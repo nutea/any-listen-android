@@ -1,6 +1,6 @@
-# AYN Listen Android
+# Any Listen Android
 
-面向私人 Any Listen 音乐服务的原生安卓客户端。仓库名按用户指定为 `ayn-listen-android`，不代表 Any Listen 官方客户端。
+面向私人 Any Listen 音乐服务的原生安卓客户端。仓库名为 `any-listen-android`，不代表 Any Listen 官方客户端。
 
 ## 当前状态
 

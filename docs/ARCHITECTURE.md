@@ -6,7 +6,7 @@
 
 Kotlin + Compose；协程/Flow；Media3 ExoPlayer + MediaSessionService；Room；设置使用 DataStore；HTTP/WebSocket 使用支持实际认证的客户端库。WorkManager 用于适合延迟执行的元数据维护，不作为长时音频播放引擎。
 
-最低版本暂定 Android 8/API 26，待目标手机确认；target/compile SDK、AGP、Kotlin、Media3、Room 在 M1 按官方兼容表锁定稳定版本，不使用动态依赖。包名暂定 `io.github.nutea.aynlisten`，首次签名分发前冻结。
+最低版本暂定 Android 8/API 26，待目标手机确认；target/compile SDK、AGP、Kotlin、Media3、Room 在 M1 按官方兼容表锁定稳定版本，不使用动态依赖。包名暂定 `io.github.nutea.anylisten`，首次签名分发前冻结。
 
 ## 分层
 
