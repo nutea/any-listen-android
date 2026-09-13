@@ -35,8 +35,13 @@ class MemoryCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, List<Cookie>>()
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        store[url.host] = cookies
+        store.compute(url.host) { _, prior ->
+            val replacements = cookies.map { Triple(it.name,it.domain,it.path) }.toSet()
+            (prior.orEmpty().filterNot { Triple(it.name,it.domain,it.path) in replacements } + cookies)
+                .filter { it.expiresAt > System.currentTimeMillis() }
+        }
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> = store[url.host].orEmpty()
+        .filter { it.expiresAt > System.currentTimeMillis() && it.matches(url) }
 }

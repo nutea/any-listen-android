@@ -268,3 +268,6 @@ DownloadRecoveryTest 与 OfflineAssetsTest 共 9 项通过，设置页回归 1 �
 - 密钥生成脚本不覆盖不完整的既有签名配置，密码通过环境变量传入 keytool；排除本地截图与发布产物，保留虚拟 README 截图。版本 0.1.0 / code 3。
 - core:model 25 项、core:data 53 项通过；lintRelease、签名 release 和 debug/test APK 构建通过。APK v2 签名验证通过，SDK 26–36，正式包名与版本匹配。
 - 模拟器 LibraryBackStackTest、ArtworkRefreshUiTest、StreamPlaybackTest、CacheRefreshAcceptanceTest、PlaylistPickerTest、LocalSelectionThemeTest、PlayerQueueTest、BufferingUiTest 共 17 项通过。正式 release APK 安装成功、冷启动 Status ok，UI 层级可正常读取。测试没有批量变更真实服务器歌曲。
+
+- 远程 Linux CI 首次因旧手写 gradlew 的 JVM 参数引号而失败；重新生成标准 Gradle 8.13 Wrapper，Git Bash / Windows 启动均验证通过。JAR 与发行包 SHA-256 依据 https://gradle.org/release-checksums/ 核对并固定。
+- 补充修复 CookieJar：匹配 Secure、路径及过期时间，同域新增 Cookie 不再清空其他 Cookie，避免同域 HTTP 封面请求携带仅限 HTTPS 的会话 Cookie。新增 2 项单元回归。
