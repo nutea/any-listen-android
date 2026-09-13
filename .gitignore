@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+local.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+secrets/
+captures/private/
+.gradle/
+.idea/
+**/build/
+*.apk
+*.aab
+*.hprof
+.DS_Store
