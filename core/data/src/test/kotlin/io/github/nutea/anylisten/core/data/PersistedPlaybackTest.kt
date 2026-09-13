@@ -15,6 +15,7 @@ class PersistedPlaybackTest {
             shuffled = true,
             repeat = RepeatMode.ONE.name,
             positionMs = 12_345,
+            laterKeys = listOf("b"),
         )
         val restored = PersistedPlayback.decode(saved.encode())
         assertEquals(saved, restored)

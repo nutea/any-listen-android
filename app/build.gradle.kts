@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.nutea.anylisten"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-dev"
+        versionCode = 3
+        versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -91,6 +91,27 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    androidTestImplementation(libs.room.runtime)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation(libs.media3.exoplayer)
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// Release inventory includes the exact resolved transitive runtime artifacts.
+tasks.register("writeReleaseDependencies") {
+    val runtime = configurations.named("releaseRuntimeClasspath")
+    val output = rootProject.layout.projectDirectory.file("release-artifacts/runtime-dependencies.tsv")
+    doLast {
+        val rows = runtime.get().incoming.artifactView {
+            componentFilter { it is org.gradle.api.artifacts.component.ModuleComponentIdentifier }
+        }.artifacts.artifacts.map { artifact ->
+            val id = artifact.id.componentIdentifier as org.gradle.api.artifacts.component.ModuleComponentIdentifier
+            "${id.group}:${id.module}:${id.version}\t${artifact.file.absolutePath}"
+        }.sorted()
+        output.asFile.parentFile.mkdirs()
+        output.asFile.writeText(rows.joinToString("\n"))
+    }
 }

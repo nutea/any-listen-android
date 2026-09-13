@@ -3,6 +3,7 @@ package io.github.nutea.anylisten.core.data.gateway
 import io.github.nutea.anylisten.core.model.AppError
 import io.github.nutea.anylisten.core.model.ErrorKind
 import io.github.nutea.anylisten.core.model.ProtocolConstants
+import java.net.InetAddress
 import java.net.URI
 
 object UrlNormalizer {
@@ -31,6 +32,34 @@ object UrlNormalizer {
         }
         val path = if (raw.startsWith("/")) raw else "/$raw"
         return httpsBase(base) + path
+    }
+
+    /** Keep the provider scheme. HTTP covers are fetched only after HTTPS is tried. */
+    fun resolveArtwork(base: String, raw: String): String = resolve(base, raw)
+
+    fun artworkFetchUrls(url: String): List<String> {
+        val trimmed = url.trim()
+        // This is used by image state collection on the UI thread: never resolve DNS here.
+        val host = hostOf(trimmed)?.removePrefix("[")?.removeSuffix("]")
+        val localLiteral = host == "127.0.0.1" || host == "::1" || host.equals("localhost", ignoreCase = true)
+        if (trimmed.startsWith("http://", ignoreCase = true) && !localLiteral) {
+            return listOf("https://" + trimmed.substring(7), trimmed)
+        }
+        return listOf(trimmed)
+    }
+
+    fun requireEncryptedOrLocal(url: String) {
+        if (!url.startsWith("http://", ignoreCase = true)) return
+        if (isLoopback(url)) return
+        throw AppError(ErrorKind.CERT_INVALID, "Cleartext URLs are only allowed for artwork")
+    }
+
+    fun isLoopback(url: String): Boolean {
+        val host = hostOf(url)?.removePrefix("[")?.removeSuffix("]") ?: return false
+        if (host.equals("localhost", ignoreCase = true) || host == "127.0.0.1" || host == "::1") {
+            return true
+        }
+        return runCatching { InetAddress.getByName(host).isLoopbackAddress }.getOrDefault(false)
     }
 
     fun wsUrl(httpBase: String, pathAndQuery: String): String {

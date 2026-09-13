@@ -4,11 +4,13 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -25,16 +27,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.animation.fadeIn
+import androidx.compose.ui.platform.LocalView
 import io.github.nutea.anylisten.R
 import io.github.nutea.anylisten.core.data.AppContainer
 import io.github.nutea.anylisten.ui.screens.ConnectScreen
 import io.github.nutea.anylisten.ui.screens.DownloadsScreen
+import io.github.nutea.anylisten.ui.screens.PlaylistScreen
+import io.github.nutea.anylisten.ui.screens.LibrarySearchScreen
 import io.github.nutea.anylisten.ui.screens.LibraryScreen
+import io.github.nutea.anylisten.ui.screens.QueueBottomSheet
 import io.github.nutea.anylisten.ui.screens.MiniPlayer
 import io.github.nutea.anylisten.ui.screens.PlayerScreen
 import io.github.nutea.anylisten.ui.screens.SettingsScreen
@@ -45,7 +50,6 @@ fun AnyListenRoot(
     playLast: Boolean = false,
     vm: AppViewModel = viewModel(),
 ) {
-    RequestNotificationPermission()
     val signedIn by vm.signedIn.collectAsState()
     LaunchedEffect(playLast, signedIn) {
         if (playLast && signedIn) {
@@ -58,30 +62,39 @@ fun AnyListenRoot(
         ConnectScreen(connect, vm::updateUrl, vm::updatePassword, vm::testHello, vm::login)
         return
     }
+    io.github.nutea.anylisten.ui.screens.LibraryDialogs(vm)
+    RequestNotificationPermission()
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val player by vm.player.collectAsState()
+    val library by vm.library.collectAsState()
+    val requestedSheet by vm.playerSheet.collectAsState()
+    val motion = rememberMotionEnabled()
+    val hapticView = LocalView.current
+    if (requestedSheet == "queue" && route != "player") {
+        QueueBottomSheet(player, vm::artworkUrl, vm::playQueueItem, vm::removeQueueItem, vm::consumePlayerSheet)
+    }
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
     Scaffold(
         bottomBar = {
-            Column {
+            if (route != "player") Column {
                 if (player.track != null && route != "player") {
-                    MiniPlayer(vm) { nav.navigate("player") }
+                    MiniPlayer(vm, { hapticView.confirmHaptic(); nav.navigate("player") }, {
+                        hapticView.tickHaptic()
+                        vm.openQueueSheet()
+                    })
                 }
                 NavigationBar {
                     listOf(
-                        "library" to (R.string.nav_library to Icons.AutoMirrored.Filled.List),
-                        "downloads" to (R.string.nav_downloads to Icons.Filled.Check),
+                        "library" to (R.string.nav_library to Icons.Filled.LibraryMusic),
+                        "downloads" to (R.string.nav_downloads to Icons.Filled.Folder),
                         "settings" to (R.string.nav_settings to Icons.Filled.Settings),
                     ).forEach { (target, spec) ->
                         NavigationBarItem(
-                            selected = route == target,
+                            selected = route == target || (target == "library" && (route == "search" || route?.startsWith("playlist/") == true)),
                             onClick = {
-                                nav.navigate(target) {
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                                nav.selectMainTab(target)
                             },
                             icon = { Icon(spec.second, contentDescription = stringResource(spec.first)) },
                             label = { Text(stringResource(spec.first)) },
@@ -91,13 +104,50 @@ fun AnyListenRoot(
             }
         },
     ) { padding ->
-        NavHost(navController = nav, startDestination = "library", modifier = Modifier.padding(padding)) {
-            composable("library") { LibraryScreen(vm) { nav.navigate("player") } }
-            composable("downloads") { DownloadsScreen(vm) { nav.navigate("player") } }
-            composable("settings") { SettingsScreen(vm) }
-            composable("player") { PlayerScreen(vm) }
+        LibraryNavHost(nav, Modifier.padding(padding).consumeWindowInsets(padding)) {
+            libraryPage("library") { entry ->
+                LibraryScreen(vm, { playlist ->
+                    if (nav.acceptsInput(entry)) {
+                        vm.openPlaylist(playlist)
+                        nav.navigate("playlist/${android.net.Uri.encode(playlist.id)}") { launchSingleTop = true }
+                    }
+                }, { if (nav.acceptsInput(entry)) nav.navigate("search") { launchSingleTop = true } })
+            }
+            libraryPage("playlist/{playlistId}") { entry ->
+                val id = entry.arguments?.getString("playlistId")
+                LaunchedEffect(id, library.snapshot.playlists, backStack?.id) {
+                    if (nav.currentBackStackEntry?.id != entry.id) return@LaunchedEffect
+                    val playlist = library.snapshot.playlists.firstOrNull { it.id == id }
+                    if (playlist != null) vm.openPlaylist(playlist)
+                    else nav.popBackStack()
+                }
+                if (library.selected?.id == id) {
+                    androidx.compose.runtime.key(id) {
+                        PlaylistScreen(vm,
+                            { if (nav.acceptsInput(entry)) nav.popBackStack() },
+                            { if (nav.acceptsInput(entry)) nav.navigate("search") },
+                            { if (nav.acceptsInput(entry)) nav.navigate("player") },
+                            canInteract = { nav.acceptsInput(entry) })
+                    }
+                }
+            }
+            libraryPage("search") {
+                LibrarySearchScreen(vm, { nav.popBackStack() }, { nav.navigate("player") })
+            }
+            libraryPage("downloads") { DownloadsScreen(vm) { nav.navigate("player") } }
+            libraryPage("settings") { SettingsScreen(vm) }
+            composable(
+                "player",
+                enterTransition = { playerEnter(motion) },
+                exitTransition = { playerExit(motion) },
+                popEnterTransition = { if (motion) fadeIn() else androidx.compose.animation.EnterTransition.None },
+                popExitTransition = { playerExit(motion) },
+            ) { androidx.compose.material3.Surface(Modifier.fillMaxSize()) { PlayerScreen(vm) { nav.popBackStack() } } }
         }
     }
+    OperationNotice(library.status, vm::acknowledgeStatus, Modifier.align(androidx.compose.ui.Alignment.TopCenter))
+    }
+
 }
 
 @Composable

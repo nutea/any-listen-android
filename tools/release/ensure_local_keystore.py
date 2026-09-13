@@ -19,6 +19,9 @@ def main() -> int:
     if PROPS.exists() and STORE.exists():
         print("Local keystore already present (gitignored).")
         return 0
+    if PROPS.exists() or STORE.exists():
+        print("Incomplete signing setup: preserve the existing file and repair the other manually.", file=sys.stderr)
+        return 1
     java_home = os.environ.get("JAVA_HOME")
     keytool = str(Path(java_home) / "bin" / "keytool") if java_home else "keytool"
     password = secrets.token_urlsafe(24)
@@ -36,15 +39,16 @@ def main() -> int:
         "2048",
         "-validity",
         "10000",
-        "-storepass",
-        password,
-        "-keypass",
-        password,
+        "-storepass:env",
+        "ANY_LISTEN_KEY_PASSWORD",
+        "-keypass:env",
+        "ANY_LISTEN_KEY_PASSWORD",
         "-dname",
         "CN=Any Listen Upload, OU=Private, O=nutea, L=Local, ST=Local, C=CN",
     ]
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                       env={**os.environ, "ANY_LISTEN_KEY_PASSWORD": password})
     except FileNotFoundError:
         print("keytool not found. Set JAVA_HOME to JDK 17.", file=sys.stderr)
         return 1

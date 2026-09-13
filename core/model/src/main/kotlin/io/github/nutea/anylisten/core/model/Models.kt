@@ -33,7 +33,7 @@ data class Track(
     val sizeLabel: String? = null,
     val extension: String? = null,
 ) {
-    val cacheKey: String get() = identity.cacheKey(fingerprint)
+    val cacheKey: String = identity.cacheKey(fingerprint)
 }
 
 data class Playlist(
@@ -144,6 +144,7 @@ data class StorageSummary(
     val downloadBytes: Long,
     val cacheBytes: Long,
     val usableBytes: Long,
+    val resourceBytes: Long = 0L,
 )
 
 object IntervalParser {

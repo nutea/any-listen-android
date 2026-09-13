@@ -1,5 +1,7 @@
 package io.github.nutea.anylisten.ui
 
+import io.github.nutea.anylisten.core.playback.playbackOrderKeys
+import kotlinx.coroutines.flow.debounce
 import android.app.Application
 import android.content.ComponentName
 import android.content.Context
@@ -29,22 +31,31 @@ import io.github.nutea.anylisten.core.model.DownloadRecord
 import io.github.nutea.anylisten.core.model.DownloadStatus
 import io.github.nutea.anylisten.core.model.ErrorKind
 import io.github.nutea.anylisten.core.model.LibrarySnapshot
+import io.github.nutea.anylisten.core.model.LocalAssetItem
+import io.github.nutea.anylisten.core.model.LocalInventory
 import io.github.nutea.anylisten.core.model.Lyrics
+import io.github.nutea.anylisten.core.model.PlayLater
 import io.github.nutea.anylisten.core.model.PlaybackMode
 import io.github.nutea.anylisten.core.model.Playlist
+import io.github.nutea.anylisten.core.model.TrackSort
+import io.github.nutea.anylisten.core.model.TrackSortField
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import io.github.nutea.anylisten.core.model.RepeatMode
 import io.github.nutea.anylisten.core.model.ServerProfile
 import io.github.nutea.anylisten.core.model.StorageSummary
 import io.github.nutea.anylisten.core.model.Track
+import io.github.nutea.anylisten.core.model.ThemeMode
+import io.github.nutea.anylisten.ui.screens.LocalBatchAction
 import io.github.nutea.anylisten.core.model.TrackIdentity
 import io.github.nutea.anylisten.core.playback.PendingPlayback
 import io.github.nutea.anylisten.core.playback.PlaybackService
+import io.github.nutea.anylisten.core.playback.removeQueuedTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -69,9 +80,11 @@ data class LibraryUiState(
     val query: String = "",
     val selected: Playlist? = null,
     val filtered: List<Track> = emptyList(),
-    val addTrack: Track? = null,
+    val pendingAdd: List<Track>? = null,
     val pendingDownload: List<Track>? = null,
     val status: String? = null,
+    val sort: TrackSortField = TrackSortField.TITLE,
+    val sortAscending: Boolean = true,
 )
 
 data class PlayerUiState(
@@ -80,12 +93,18 @@ data class PlayerUiState(
     val queue: List<Track> = emptyList(),
     val error: String? = null,
     val isPlaying: Boolean = false,
+    val playWhenReady: Boolean = false,
+    val isBuffering: Boolean = false,
+    val availableOffline: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val shuffled: Boolean = false,
+    val playbackOrder: List<String> = emptyList(),
     val repeat: RepeatMode = RepeatMode.ALL,
+    val laterKeys: List<String> = emptyList(),
 )
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val container: AppContainer = (application as AnyListenApp).container
     private val _connect = MutableStateFlow(ConnectUiState())
@@ -96,18 +115,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val player: StateFlow<PlayerUiState> = _player.asStateFlow()
     private val _downloads = MutableStateFlow<List<DownloadRecord>>(emptyList())
     val downloads: StateFlow<List<DownloadRecord>> = _downloads.asStateFlow()
+    private val _downloadedAssets = MutableStateFlow<List<LocalAssetItem>>(emptyList())
+    val downloadedAssets: StateFlow<List<LocalAssetItem>> = _downloadedAssets.asStateFlow()
+    private val _cachedAssets = MutableStateFlow<List<LocalAssetItem>>(emptyList())
+    val cachedAssets: StateFlow<List<LocalAssetItem>> = _cachedAssets.asStateFlow()
     private val _storage = MutableStateFlow(StorageSummary(0, 0, 0))
     val storage: StateFlow<StorageSummary> = _storage.asStateFlow()
-    private val _wifiOnly = MutableStateFlow(true)
-    val wifiOnly: StateFlow<Boolean> = _wifiOnly.asStateFlow()
+    private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+    private val _autoCacheAudio = MutableStateFlow(true)
+    val autoCacheAudio: StateFlow<Boolean> = _autoCacheAudio.asStateFlow()
     private val _signedIn = MutableStateFlow(false)
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
+    private val _playerSheet = MutableStateFlow<String?>(null)
+    val playerSheet: StateFlow<String?> = _playerSheet.asStateFlow()
     private val _profile = MutableStateFlow<ServerProfile?>(null)
     val profile: StateFlow<ServerProfile?> = _profile.asStateFlow()
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var lyricsForKey: String? = null
+    private var lyricsJob: kotlinx.coroutines.Job? = null
+    private var lyricsAttemptAt = 0L
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastPersistAt = 0L
 
@@ -117,7 +146,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            _player.update { it.copy(error = applicationContext.getString(R.string.error_track)) }
+            _player.update { it.copy(error = applicationContext.getString(R.string.error_track), isBuffering = false, playWhenReady = false) }
         }
     }
 
@@ -131,14 +160,55 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     state.copy(
                         snapshot = snap,
                         selected = selected,
-                        filtered = filter(snap, selected, state.query),
+                        filtered = filter(snap, selected, state.query, state.sort, state.sortAscending),
+                    )
+                }
+                val freshTracks = snap.tracksByPlaylist.values.flatten().associateBy { it.cacheKey }
+                _player.update { state ->
+                    state.copy(
+                        track = state.track?.let { old -> freshTracks[old.cacheKey]?.let { old.copy(coverUrl = it.coverUrl) } ?: old },
+                        queue = state.queue.map { old -> freshTracks[old.cacheKey]?.let { old.copy(coverUrl = it.coverUrl) } ?: old },
                     )
                 }
                 if (_player.value.queue.isEmpty()) restorePlayback()
             }
         }
-        viewModelScope.launch { container.downloads.observe().collect { _downloads.value = it } }
-        viewModelScope.launch { container.settings.wifiOnly.collect { _wifiOnly.value = it } }
+        viewModelScope.launch {
+            combine(container.downloads.observe(), container.library.observeLibrary()) { records, snap ->
+                records to snap
+            }.collect { (records, snap) ->
+                _downloads.value = records
+                rebuildLocalInventory(records, snap)
+            }
+        }
+        viewModelScope.launch {
+            container.offlineAssets.updates.debounce(150).collect {
+                val candidates = _library.value.snapshot.tracksByPlaylist.values.flatten() + _player.value.queue
+                val covers = withContext(Dispatchers.IO) {
+                    candidates.distinctBy { it.cacheKey }.associate { it.cacheKey to container.offlineAssets.savedCoverUrl(it.cacheKey) }
+                }
+                fun updatedCover(track: Track): Track = covers[track.cacheKey]?.let { track.copy(coverUrl = it) } ?: track
+                _library.update { state -> state.copy(
+                    snapshot = state.snapshot.copy(tracksByPlaylist = state.snapshot.tracksByPlaylist.mapValues { (_, tracks) -> tracks.map(::updatedCover) }),
+                    filtered = state.filtered.map(::updatedCover),
+                ) }
+                val track = _player.value.track
+                val lyrics = withContext(Dispatchers.IO) { track?.let { container.offlineAssets.cachedLyrics(it) } }
+                _player.update { state -> state.copy(
+                    track = state.track?.let(::updatedCover), queue = state.queue.map(::updatedCover),
+                    lyrics = if (state.track?.cacheKey == track?.cacheKey) lyrics else state.lyrics,
+                ) }
+                rebuildLocalInventory(_downloads.value, _library.value.snapshot)
+            }
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                delay(io.github.nutea.anylisten.core.data.CACHE_CHECK_INTERVAL_MS)
+                container.refreshCachedResources()
+            }
+        }
+        viewModelScope.launch { container.settings.themeMode.collect { _themeMode.value = it } }
+        viewModelScope.launch { container.settings.autoCacheAudio.collect { _autoCacheAudio.value = it } }
         viewModelScope.launch {
             restoreSession()
             refreshStorage()
@@ -157,13 +227,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updatePassword(value: String) = _connect.update { it.copy(password = value, error = null) }
     fun updateQuery(value: String) {
         _library.update { state ->
-            state.copy(query = value, filtered = filter(state.snapshot, state.selected, value))
+            if (state.query == value) state else state.copy(query = value, filtered = filter(state.snapshot, state.selected, value, state.sort, state.sortAscending))
         }
     }
 
     fun selectPlaylist(playlist: Playlist) {
         _library.update { state ->
-            state.copy(selected = playlist, filtered = filter(state.snapshot, playlist, state.query))
+            if (state.selected == playlist) state else state.copy(selected = playlist, filtered = filter(state.snapshot, playlist, state.query, state.sort, state.sortAscending))
+        }
+    }
+
+    fun openPlaylist(playlist: Playlist) {
+        _library.update { state ->
+            if (state.selected == playlist && state.query.isEmpty()) state
+            else state.copy(selected = playlist, query = "",
+                filtered = filter(state.snapshot, playlist, "", state.sort, state.sortAscending))
         }
     }
 
@@ -201,25 +279,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refresh() {
         viewModelScope.launch {
             _library.update { it.copy(refreshing = true, error = null) }
-            runCatching { container.library.refresh() }
+            runCatching { container.library.refresh(); viewModelScope.launch { container.refreshCachedResources(); refreshStorage() }; refreshStorage() }
                 .onFailure { error -> _library.update { it.copy(error = message(error)) } }
             _library.update { it.copy(refreshing = false) }
         }
     }
 
-    fun play(tracks: List<Track>, start: Track? = tracks.firstOrNull(), startPositionMs: Long = 0L) {
+    fun play(tracks: List<Track>, start: Track? = tracks.firstOrNull(), startPositionMs: Long = 0L, laterKeys: List<String> = emptyList()) {
         if (tracks.isEmpty()) return
         val current = _player.value
         _player.update {
-            it.copy(track = start, queue = tracks, error = null, lyrics = null, positionMs = startPositionMs)
+            it.copy(track = start, queue = tracks, error = null, lyrics = null, positionMs = startPositionMs, laterKeys = laterKeys, isPlaying = false, playWhenReady = true, isBuffering = true)
         }
         lyricsForKey = null
-        val pending = PendingPlayback(tracks, start, current.shuffled, current.repeat, startPositionMs)
+        val pending = PendingPlayback(tracks, start, current.shuffled, current.repeat, startPositionMs, laterKeys)
         PlaybackService.pendingPlay.set(pending)
         val service = PlaybackService.service
         if (service != null) {
             PlaybackService.pendingPlay.set(null)
-            service.playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs)
+            service.playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs, pending.laterKeys)
         } else {
             applicationContext.startService(Intent(applicationContext, PlaybackService::class.java))
         }
@@ -233,7 +311,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             restorePlayback()
             val state = _player.value
             if (state.queue.isNotEmpty()) {
-                play(state.queue, state.track, state.positionMs)
+                play(state.queue, state.track, state.positionMs, state.laterKeys)
                 return@launch
             }
             val completed = _downloads.value.firstOrNull { it.status == DownloadStatus.COMPLETED }
@@ -255,18 +333,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         play(listOf(track), track)
     }
 
+    fun playLocal(item: LocalAssetItem) {
+        if (!item.completeness.audioReady) return
+        play(listOf(item.track), item.track)
+    }
+
+    fun acknowledgeStatus() {
+        _library.update { it.copy(status = null) }
+    }
+
     fun togglePlayPause() {
         val c = controller
         val state = _player.value
         if (c == null || c.mediaItemCount == 0) {
             if (state.queue.isNotEmpty()) {
-                play(state.queue, state.track, state.positionMs)
+                play(state.queue, state.track, state.positionMs, state.laterKeys)
             } else {
                 playLast()
             }
             return
         }
-        if (c.isPlaying) c.pause() else c.play()
+        if (c.playWhenReady && c.playerError == null && c.playbackState != Player.STATE_ENDED) c.pause()
+        else if (c.playerError != null || c.playbackState == Player.STATE_IDLE) {
+            PlaybackService.service?.recoverConnection(playRequested = true)
+        } else c.play()
     }
 
     fun skipNext() {
@@ -288,14 +378,79 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun seekTo(positionMs: Long) {
-        controller?.seekTo(positionMs.coerceAtLeast(0L))
+        val position = positionMs.coerceAtLeast(0L)
+        if (controller?.mediaItemCount?.let { it > 0 } == true) controller?.seekTo(position)
+        else {
+            _player.update { it.copy(positionMs = position) }
+            persistPlayback(force = true)
+        }
+    }
+
+    fun setSort(field: TrackSortField) {
+        _library.update { state ->
+            val ascending = if (state.sort == field) !state.sortAscending else true
+            state.copy(
+                sort = field,
+                sortAscending = ascending,
+                filtered = filter(state.snapshot, state.selected, state.query, field, ascending),
+            )
+        }
+    }
+
+    fun playLater(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        val state = _player.value
+        val result = PlayLater.insert(state.queue, state.track?.cacheKey, state.laterKeys, tracks)
+        _player.update { it.copy(queue = result.queue, laterKeys = result.laterKeys) }
+        PlaybackService.pendingPlay.updateAndGet { pending ->
+            pending?.copy(tracks = result.queue, laterKeys = result.laterKeys)
+        }
+        PlaybackService.service?.applyQueuePreservingCurrent(result.queue, result.laterKeys)
+        persistPlayback(force = true)
+        _library.update { it.copy(status = applicationContext.getString(R.string.play_later_added, tracks.size)) }
     }
 
     fun cyclePlayMode() {
         applyPlayMode(PlaybackMode.from(_player.value.repeat, _player.value.shuffled).next())
     }
 
+    fun setPlayMode(mode: PlaybackMode) {
+        applyPlayMode(mode)
+        persistPlayback(force = true)
+    }
+
+    fun removeQueueItem(track: Track) {
+        val state = _player.value
+        val index = state.queue.indexOfFirst { it.cacheKey == track.cacheKey }
+        if (index < 0) return
+        val remaining = state.queue.toMutableList().apply { removeAt(index) }
+        val removingCurrent = state.track?.cacheKey == track.cacheKey
+        val next = if (removingCurrent) remaining.getOrNull(index.coerceAtMost(remaining.lastIndex)) else state.track
+        _player.update { it.copy(queue = remaining, track = next, lyrics = if (removingCurrent) null else it.lyrics,
+            positionMs = if (removingCurrent) 0 else it.positionMs,
+            durationMs = if (removingCurrent) next?.durationMs ?: 0L else it.durationMs,
+            laterKeys = it.laterKeys.filter { key -> key != track.cacheKey }) }
+        PlaybackService.pendingPlay.updateAndGet { pending ->
+            pending?.let { request ->
+                val kept = request.tracks.filterNot { it.cacheKey == track.cacheKey }
+                if (kept.isEmpty()) null else request.copy(tracks = kept, start = next, startPositionMs = if (removingCurrent) 0 else request.startPositionMs)
+            }
+        }
+        val c = controller
+        if (PlaybackService.service?.removeQueueTrack(track.cacheKey) != true) c?.removeQueuedTrack(track.cacheKey)
+        if (remaining.isEmpty()) {
+            c?.stop()
+            c?.clearMediaItems()
+            _player.value = PlayerUiState(shuffled = state.shuffled, repeat = state.repeat)
+            viewModelScope.launch { container.settings.setPlayback(PersistedPlayback()) }
+        } else {
+            persistPlayback(force = true)
+        }
+    }
+
     private fun applyPlayMode(mode: PlaybackMode) {
+        PlaybackService.pendingPlay.updateAndGet { it?.copy(shuffled = mode.shuffled, repeat = mode.repeat) }
+        PlaybackService.service?.setPlaybackMode(mode)
         controller?.shuffleModeEnabled = mode.shuffled
         controller?.repeatMode = when (mode.repeat) {
             RepeatMode.OFF -> Player.REPEAT_MODE_OFF
@@ -348,6 +503,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun openQueueSheet() { _playerSheet.value = "queue" }
+    fun consumePlayerSheet() { _playerSheet.value = null }
+
+    fun isAvailableOffline(track: Track): Boolean =
+        container.offlineAssets.audioFile(track.cacheKey) != null ||
+            _downloads.value.any { it.cacheKey == track.cacheKey && it.status == DownloadStatus.COMPLETED && it.filePath?.let(::File)?.isFile == true }
+
     fun isFavorite(track: Track): Boolean {
         val love = _library.value.snapshot.tracksByPlaylist[ProtocolConstants.LIST_LOVE].orEmpty()
         return love.any { it.identity.remoteTrackId == track.identity.remoteTrackId }
@@ -371,36 +533,64 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun removeFromSelected(track: Track) {
+    fun removeFromSelected(track: Track) = removeFromSelected(listOf(track))
+
+    fun removeFromSelected(tracks: List<Track>) {
         val playlist = _library.value.selected ?: return
-        if (!playlist.canMutateOnline) return
-        removeFromPlaylist(playlist.id, track)
+        if (!playlist.canMutateOnline || tracks.isEmpty()) return
+        if (tracks.size == 1) {
+            removeFromPlaylist(playlist.id, tracks.first())
+            return
+        }
+        viewModelScope.launch {
+            var ok = 0
+            var fail = 0
+            var lastError: Throwable? = null
+            tracks.forEach { track ->
+                runCatching { container.library.removeFromPlaylist(playlist.id, track) }
+                    .onSuccess { ok++ }
+                    .onFailure { error -> fail++; lastError = error }
+            }
+            _library.update {
+                it.copy(
+                    error = if (ok == 0) lastError?.let(::message) else null,
+                    status = applicationContext.getString(R.string.batch_result, ok, fail),
+                )
+            }
+        }
     }
 
-    fun startAddToPlaylist(track: Track) {
-        _library.update { it.copy(addTrack = track, error = null, status = null) }
+    fun startAddToPlaylist(track: Track) = startAddToPlaylist(listOf(track))
+
+    fun startAddToPlaylist(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        _library.update { it.copy(pendingAdd = tracks, error = null, status = null) }
     }
 
     fun cancelAddToPlaylist() {
-        _library.update { it.copy(addTrack = null) }
+        _library.update { it.copy(pendingAdd = null) }
     }
 
     fun confirmAddToPlaylist(playlist: Playlist) {
-        val track = _library.value.addTrack ?: return
+        val tracks = _library.value.pendingAdd ?: return
+        _library.update { it.copy(pendingAdd = null) }
         viewModelScope.launch {
-            runCatching { container.library.addToPlaylist(playlist.id, track) }
-                .onSuccess {
-                    _library.update {
-                        it.copy(
-                            addTrack = null,
-                            error = null,
-                            status = applicationContext.getString(R.string.added_to_playlist, playlistLabel(playlist)),
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _library.update { it.copy(addTrack = null, error = message(error), status = null) }
-                }
+            var ok = 0
+            var fail = 0
+            var lastError: Throwable? = null
+            tracks.forEach { track ->
+                runCatching { container.library.addToPlaylist(playlist.id, track) }
+                    .onSuccess { ok++ }
+                    .onFailure { error -> fail++; lastError = error }
+            }
+            _library.update {
+                it.copy(
+                    error = if (ok == 0) lastError?.let(::message) else null,
+                    status = if (tracks.size == 1 && fail == 0) {
+                        applicationContext.getString(R.string.added_to_playlist, playlistLabel(playlist))
+                    } else applicationContext.getString(R.string.batch_result, ok, fail),
+                )
+            }
         }
     }
 
@@ -416,18 +606,47 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun batchLocal(tab: Int, keys: List<String>, action: LocalBatchAction) = viewModelScope.launch {
+        val keySet = keys.toSet()
+        val assets = (if (tab == 0) _downloadedAssets.value else _cachedAssets.value).filter { it.cacheKey in keySet }
+        val tracks = assets.filter { it.completeness.audioReady }.map { it.track }
+        when (action) {
+            LocalBatchAction.PLAY -> if (tracks.isNotEmpty()) play(tracks)
+            LocalBatchAction.LATER -> if (tracks.isNotEmpty()) playLater(tracks)
+            LocalBatchAction.DELETE -> assets.forEach { if (tab == 0) container.downloads.deleteLocal(it.cacheKey) else container.offlineAssets.clearTrack(it.cacheKey) }
+            LocalBatchAction.RETRY -> _downloads.value.filter { it.cacheKey in keySet && it.status in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED, DownloadStatus.PAUSED) }.forEach { container.downloads.retry(it.cacheKey) }
+            LocalBatchAction.CANCEL -> _downloads.value.filter { it.cacheKey in keySet && it.status in setOf(DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING) }.forEach { container.downloads.cancel(it.cacheKey) }
+            LocalBatchAction.REMOVE -> keys.forEach { container.downloads.removeTask(it) }
+        }
+        refreshStorage()
+    }
+
     fun retryDownload(cacheKey: String) = viewModelScope.launch { container.downloads.retry(cacheKey) }
+    fun removeDownloadTask(cacheKey: String) = viewModelScope.launch {
+        container.downloads.removeTask(cacheKey)
+        refreshStorage()
+    }
+
     fun cancelDownload(cacheKey: String) = viewModelScope.launch { container.downloads.cancel(cacheKey) }
     fun deleteDownload(cacheKey: String) = viewModelScope.launch {
         container.downloads.deleteLocal(cacheKey)
         refreshStorage()
+        rebuildLocalInventory(_downloads.value, _library.value.snapshot)
     }
 
-    fun resumeDownloads() = viewModelScope.launch { container.downloads.resumePaused() }
+    fun deleteCache(cacheKey: String) = viewModelScope.launch {
+        container.offlineAssets.clearTrack(cacheKey)
+        refreshStorage()
+        rebuildLocalInventory(_downloads.value, _library.value.snapshot)
+    }
 
-    fun setWifiOnly(value: Boolean) = viewModelScope.launch {
-        container.settings.setWifiOnly(value)
-        if (!value) container.downloads.resumePaused()
+    fun resumeDownloads() = viewModelScope.launch { container.downloads.resumePaused(); container.refreshCachedResources() }
+
+    fun setThemeMode(value: ThemeMode) = viewModelScope.launch { container.settings.setThemeMode(value) }
+
+    fun setAutoCacheAudio(value: Boolean) = viewModelScope.launch {
+        container.settings.setAutoCacheAudio(value)
+        container.offlineAssets.setAutomaticAudioCaching(value)
     }
 
     fun logout() {
@@ -446,10 +665,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun artworkUrl(track: Track?): String? {
-        val raw = track?.coverUrl?.takeIf { it.isNotBlank() } ?: return null
-        if (raw.startsWith("https://") || raw.startsWith("file:")) return raw
+        if (track != null && track.coverUrl.isNullOrBlank()) container.offlineAssets.requestCover(track)
+        val raw = track?.let { container.offlineAssets.peekCoverUrl(it.cacheKey) } ?: track?.coverUrl?.takeIf { it.isNotBlank() } ?: return null
+        return resolveArtworkUrl(raw)
+    }
+
+    fun playlistArtworkUrl(playlist: Playlist): String? = playlist.coverUrl?.takeIf { it.isNotBlank() }?.let(::resolveArtworkUrl)
+
+    private fun resolveArtworkUrl(raw: String): String? {
+        if (raw.startsWith("https://") || raw.startsWith("http://") || raw.startsWith("file:")) return raw
         val base = _profile.value?.baseUrl ?: container.sessionStore.current()?.profile?.baseUrl ?: return null
-        return runCatching { UrlNormalizer.resolve(base, raw) }.getOrNull()
+        return runCatching { UrlNormalizer.resolveArtwork(base, raw) }.getOrNull()
     }
 
     fun currentLyricIndex(): Int {
@@ -461,10 +687,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearPlaybackCache() {
         viewModelScope.launch(Dispatchers.IO) {
+            container.offlineAssets.clearAudio()
             container.cacheDir.deleteRecursively()
             container.cacheDir.mkdirs()
             File(applicationContext.cacheDir, "exoplayer").deleteRecursively()
             refreshStorage()
+            rebuildLocalInventory(_downloads.value, _library.value.snapshot)
             _library.update { it.copy(status = applicationContext.getString(R.string.cache_cleared)) }
         }
     }
@@ -549,10 +777,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun publishController(player: Player) {
+        // A newly bound service has no timeline; keep the restored queue and position.
+        if (player.mediaItemCount == 0) return
         val mediaId = player.currentMediaItem?.mediaId
         val queued = _player.value.queue.firstOrNull { it.cacheKey == mediaId }
         val meta = player.currentMediaItem?.mediaMetadata
-        val track = queued ?: _player.value.track?.takeIf { it.cacheKey == mediaId } ?: meta?.let { metadata ->
+        val track = PlaybackService.service?.trackForKey(mediaId) ?: queued
+            ?: _library.value.snapshot.tracksByPlaylist.values.asSequence().flatten().firstOrNull { it.cacheKey == mediaId }
+            ?: _player.value.track?.takeIf { it.cacheKey == mediaId } ?: meta?.let { metadata ->
             if (mediaId.isNullOrBlank() && metadata.title.isNullOrBlank()) return@let null
             Track(
                 identity = TrackIdentity("session", mediaId ?: metadata.title?.toString().orEmpty()),
@@ -564,7 +796,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         val duration = player.duration.takeIf { it > 0 } ?: track?.durationMs ?: 0L
-        val repeat = when (player.repeatMode) {
+        val repeat = when (PlaybackService.service?.logicalRepeatMode() ?: player.repeatMode) {
             Player.REPEAT_MODE_ONE -> RepeatMode.ONE
             Player.REPEAT_MODE_OFF -> RepeatMode.OFF
             else -> RepeatMode.ALL
@@ -573,10 +805,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 track = track ?: it.track,
                 isPlaying = player.isPlaying,
+                playWhenReady = player.playWhenReady && player.playerError == null && player.playbackState != Player.STATE_ENDED,
+                isBuffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING && player.playerError == null,
+                error = if (player.playerError == null) null else it.error,
                 positionMs = player.currentPosition.coerceAtLeast(0L),
                 durationMs = duration,
+                availableOffline = track?.let { isAvailableOffline(it) } == true,
                 shuffled = player.shuffleModeEnabled,
+                playbackOrder = PlaybackService.service?.playbackOrderKeys()
+                    ?: player.playbackOrderKeys(),
                 repeat = repeat,
+                laterKeys = it.laterKeys.filter { key -> key != track?.cacheKey },
             )
         }
         track?.let { loadLyrics(it) }
@@ -584,6 +823,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun persistPlayback(force: Boolean = false) {
+        // The service owns persistence while its timeline is active, including background playback.
+        if (PlaybackService.service?.hasPlaybackQueue() == true) return
         val state = _player.value
         if (state.queue.isEmpty()) return
         val now = System.currentTimeMillis()
@@ -597,6 +838,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     shuffled = state.shuffled,
                     repeat = state.repeat.name,
                     positionMs = state.positionMs,
+                    laterKeys = state.laterKeys,
                 ),
             )
         }
@@ -617,17 +859,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val fromDl = downloads.associate { it.cacheKey to it.toTrack() }
         val tracks = saved.cacheKeys.mapNotNull { fromLib[it] ?: fromDl[it] }
-        if (tracks.isEmpty()) return
+        if (tracks.isEmpty() || _player.value.queue.isNotEmpty() || PlaybackService.service?.hasPlaybackQueue() == true) return
+        val restoredTrack = tracks.firstOrNull { it.cacheKey == saved.currentKey } ?: tracks.first()
         _player.update {
             it.copy(
                 queue = tracks,
-                track = tracks.firstOrNull { item -> item.cacheKey == saved.currentKey } ?: tracks.first(),
+                track = restoredTrack,
+                durationMs = restoredTrack.durationMs ?: 0L,
+                availableOffline = isAvailableOffline(restoredTrack),
                 shuffled = saved.shuffled,
                 repeat = saved.repeatMode(),
                 positionMs = saved.positionMs,
-                isPlaying = false,
+                isPlaying = false, playWhenReady = false, isBuffering = false,
+                laterKeys = saved.laterKeys,
             )
         }
+        loadLyrics(restoredTrack)
     }
 
     private fun DownloadRecord.toTrack(): Track = Track(
@@ -640,13 +887,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private fun loadLyrics(track: Track) {
-        if (lyricsForKey == track.cacheKey) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lyricsForKey == track.cacheKey && (lyricsJob?.isActive == true ||
+            _player.value.lyrics?.lines?.isNotEmpty() == true || now - lyricsAttemptAt < 30_000L)) return
+        lyricsJob?.cancel()
+        if (lyricsForKey != track.cacheKey) _player.update { it.copy(lyrics = null) }
         lyricsForKey = track.cacheKey
-        viewModelScope.launch {
-            val lyrics = runCatching { container.gateway.resolveLyrics(track) }.getOrNull()
-            if (lyricsForKey == track.cacheKey) {
-                _player.update { it.copy(lyrics = lyrics) }
-            }
+        lyricsAttemptAt = now
+        lyricsJob = viewModelScope.launch {
+            // Restored/download-only queue metadata may omit isLocal, filePath and deviceId.
+            val fullTrack = container.library.cachedTrack(track.cacheKey) ?: track
+            val lyrics = try { container.offlineAssets.lyrics(fullTrack) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            if (lyricsForKey == track.cacheKey) _player.update { it.copy(lyrics = lyrics) }
         }
     }
 
@@ -687,34 +941,73 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("download_bytes=${_storage.value.downloadBytes}")
             appendLine("cache_bytes=${_storage.value.cacheBytes}")
             appendLine("usable_bytes=${_storage.value.usableBytes}")
-            appendLine("wifi_only=${_wifiOnly.value}")
         }
     }
 
     private fun registerNetworkCallback() {
         val cm = applicationContext.getSystemService(ConnectivityManager::class.java) ?: return
         val callback = object : ConnectivityManager.NetworkCallback() {
+            private var availableNetwork: Network? = null
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || !_wifiOnly.value) {
-                    resumeDownloads()
-                }
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    if (availableNetwork != network) {
+                        availableNetwork = network
+                        resumeDownloads()
+                    }
+                } else if (availableNetwork == network) availableNetwork = null
+            }
+            override fun onLost(network: Network) {
+                if (availableNetwork == network) availableNetwork = null
             }
         }
         networkCallback = callback
         runCatching { cm.registerDefaultNetworkCallback(callback) }
     }
 
-    private suspend fun refreshStorage() {
+    suspend fun refreshStorage() {
         _storage.value = container.downloads.storage()
+        rebuildLocalInventory(_downloads.value, _library.value.snapshot)
     }
 
-    private fun filter(snapshot: LibrarySnapshot, playlist: Playlist?, query: String): List<Track> {
+    fun refreshLocal() {
+        viewModelScope.launch { rebuildLocalInventory(_downloads.value, _library.value.snapshot) }
+    }
+
+    private suspend fun rebuildLocalInventory(records: List<DownloadRecord>, snap: LibrarySnapshot) {
+        val libraryTracks = snap.tracksByPlaylist.values.flatten().associateBy { it.cacheKey }
+        val completedKeys = records.filter { it.status == DownloadStatus.COMPLETED }.map { it.cacheKey }.toSet()
+        val inventory = withContext(Dispatchers.IO) {
+            val catalog = container.offlineAssets.catalog()
+            LocalInventory.downloaded(
+                records = records,
+                inspect = { container.offlineAssets.inspect(it) },
+                fileReady = { record -> record.filePath?.let(::File)?.isFile == true },
+                libraryTracks = libraryTracks,
+            ) to LocalInventory.cached(
+                catalog = catalog,
+                inspect = { container.offlineAssets.inspect(it) },
+                completedDownloadKeys = completedKeys,
+                libraryTracks = libraryTracks,
+                audioBytes = { container.offlineAssets.audioFile(it)?.length() ?: 0L },
+            )
+        }
+        _downloadedAssets.value = inventory.first
+        _cachedAssets.value = inventory.second
+    }
+
+    private fun filter(
+        snapshot: LibrarySnapshot,
+        playlist: Playlist?,
+        query: String,
+        sort: TrackSortField,
+        ascending: Boolean,
+    ): List<Track> {
         val tracks = snapshot.tracksByPlaylist[playlist?.id].orEmpty()
         val q = query.trim().lowercase()
-        if (q.isEmpty()) return tracks
-        return tracks.filter {
+        val searched = if (q.isEmpty()) tracks else tracks.filter {
             it.title.lowercase().contains(q) || it.artist.lowercase().contains(q) || it.album.lowercase().contains(q)
         }
+        return TrackSort.apply(searched, sort, ascending)
     }
 
     private fun message(error: Throwable): String {

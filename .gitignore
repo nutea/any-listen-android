@@ -8,13 +8,16 @@ keystore.properties
 *.p12
 *.pem
 secrets/
-captures/private/
+captures/
 **/__pycache__/
 *.pyc
 .gradle/
+.kotlin/
 .idea/
 **/build/
 *.apk
 *.aab
 *.hprof
 .DS_Store
+
+release-artifacts/

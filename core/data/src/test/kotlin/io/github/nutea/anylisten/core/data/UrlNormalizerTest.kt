@@ -64,6 +64,46 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun artworkKeepsHttpAndListsHttpsFirst() {
+        val raw = "http://imge.kugou.com/stdmusic/480/cover.jpg?size=480"
+        assertEquals(raw, UrlNormalizer.resolveArtwork("https://example.test", raw))
+        assertEquals(raw, UrlNormalizer.resolve("https://example.test", raw))
+        assertEquals(
+            listOf("https://imge.kugou.com/stdmusic/480/cover.jpg?size=480", raw),
+            UrlNormalizer.artworkFetchUrls(raw),
+        )
+        assertEquals(
+            listOf("https://cdn.example/cover.jpg"),
+            UrlNormalizer.artworkFetchUrls("https://cdn.example/cover.jpg"),
+        )
+        assertEquals(
+            listOf("http://127.0.0.1:9/cover"),
+            UrlNormalizer.artworkFetchUrls("http://127.0.0.1:9/cover"),
+        )
+        assertEquals("https://example.test/api/p_static/cover.jpg",
+            UrlNormalizer.resolveArtwork("https://example.test", "al-ps-host:/api/p_static/cover.jpg"))
+    }
+
+    @Test
+    fun rejectsCleartextExceptLoopback() {
+        try {
+            UrlNormalizer.httpsBase("http://music.example")
+            throw AssertionError("expected failure")
+        } catch (error: AppError) {
+            assertEquals("Only HTTPS server URLs are allowed", error.message)
+        }
+        try {
+            UrlNormalizer.requireEncryptedOrLocal("http://cdn.example/a.mp3")
+            throw AssertionError("expected failure")
+        } catch (error: AppError) {
+            assertEquals("Cleartext URLs are only allowed for artwork", error.message)
+        }
+        UrlNormalizer.requireEncryptedOrLocal("http://127.0.0.1:8080/a.mp3")
+        UrlNormalizer.requireEncryptedOrLocal("http://localhost/a.mp3")
+        UrlNormalizer.requireEncryptedOrLocal("https://cdn.example/a.mp3")
+    }
+
+    @Test
     fun sameHostAfterRewrite() {
         val media = UrlNormalizer.resolve("https://example.test", "al-ps-host:/api/p_static/x.mp3")
         assertTrue(UrlNormalizer.sameHost("https://example.test", media))

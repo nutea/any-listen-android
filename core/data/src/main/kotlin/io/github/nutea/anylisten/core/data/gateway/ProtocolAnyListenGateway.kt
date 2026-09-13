@@ -99,6 +99,7 @@ class ProtocolAnyListenGateway(
         val url = result["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (url.isBlank()) throw AppError(ErrorKind.TRACK_UNAVAILABLE, "Empty media URL")
         val absolute = UrlNormalizer.resolve(session!!.profile.baseUrl, url)
+        UrlNormalizer.requireEncryptedOrLocal(absolute)
         return MediaResource(
             url = absolute,
             quality = result["quality"]?.jsonPrimitive?.contentOrNull.orEmpty(),
@@ -109,7 +110,7 @@ class ProtocolAnyListenGateway(
     override suspend fun resolveCover(track: Track): String? {
         val call = requireIpc()
         val payload = Message2Call.obj("musicInfo" to ProtocolDtos.trackToProtocol(track))
-        val result = runCatching { call.call(listOf("getMusicPic"), listOf(payload))?.jsonObject }.getOrNull()
+        val result = call.call(listOf("getMusicPic"), listOf(payload))?.jsonObject
         val url = result?.get("url")?.jsonPrimitive?.contentOrNull ?: return track.coverUrl
         return url.takeIf { it.isNotBlank() }?.let { resolvePublicUrl(it) } ?: track.coverUrl
     }
@@ -117,7 +118,7 @@ class ProtocolAnyListenGateway(
     override suspend fun resolveLyrics(track: Track): Lyrics {
         val call = requireIpc()
         val payload = Message2Call.obj("musicInfo" to ProtocolDtos.trackToProtocol(track))
-        val result = runCatching { call.call(listOf("getMusicLyric"), listOf(payload))?.jsonObject }.getOrNull()
+        val result = call.call(listOf("getMusicLyric"), listOf(payload))?.jsonObject
         val info = result?.get("info")?.jsonObject
         val raw = listOf("lyric", "awlyric", "tlyric")
             .firstNotNullOfOrNull { key -> info?.get(key)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } }
@@ -200,7 +201,7 @@ class ProtocolAnyListenGateway(
         val value = raw?.trim().orEmpty()
         if (value.isEmpty()) return null
         val sessionBase = session?.profile?.baseUrl ?: return null
-        return runCatching { UrlNormalizer.resolve(sessionBase, value) }.getOrNull()
+        return runCatching { UrlNormalizer.resolveArtwork(sessionBase, value) }.getOrNull()
     }
 
     private suspend fun connectLocked(info: SessionInfo) {
@@ -226,7 +227,7 @@ class ProtocolAnyListenGateway(
                     }
 
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        connected.set(false)
+                        if (ipc === client) connected.set(false)
                         client.destroy(t.message ?: "socket failed")
                         if (cont.isActive) {
                             val code = response?.code
@@ -238,7 +239,7 @@ class ProtocolAnyListenGateway(
                     }
 
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                        connected.set(false)
+                        if (ipc === client) connected.set(false)
                         client.destroy("closed")
                     }
                 },

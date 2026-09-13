@@ -33,6 +33,8 @@ class LibraryRepository(
         )
     }
 
+    suspend fun cachedTrack(cacheKey: String): Track? = dao.track(cacheKey)?.toModel()
+
     suspend fun cached(): LibrarySnapshot {
         val playlists = dao.playlists()
         return LibrarySnapshot(

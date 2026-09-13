@@ -47,4 +47,4 @@ UI / ViewModel → Repository → `AnyListenGateway` / Room / 下载协调器。
 
 ## 凭据与传输
 
-系统 TLS 校验；禁止明文（非 localhost）和 trust-all。会话用 EncryptedSharedPreferences。跨主机重定向不转发认证 Cookie。日志、备份、诊断不写可复用令牌或完整媒体 URL。媒体文件在应用私有存储，不申请全盘管理权限。
+系统 TLS 校验；服务器、登录、API 与音频禁止明文（非 localhost）。封面先请求 HTTPS，失败后再回落 HTTP。禁止 trust-all。会话用 EncryptedSharedPreferences。跨主机重定向不转发认证 Cookie。日志、备份、诊断不写可复用令牌或完整媒体 URL。媒体文件在应用私有存储，不申请全盘管理权限。

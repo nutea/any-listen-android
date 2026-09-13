@@ -1,0 +1,4 @@
+<resources>
+    <string name="download_extras_incomplete">Audio saved; cover or lyrics could not be saved. Download this song again to retry.</string>
+    <string name="download_legacy_repair">Old download files conflict. Reconnecting will download these songs again.</string>
+</resources>

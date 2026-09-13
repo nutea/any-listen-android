@@ -19,7 +19,11 @@ class SessionRepository(
         return info
     }
 
-    suspend fun restore(): SessionInfo? {
+    private val restoreFlight = SingleFlight<SessionInfo?>()
+
+    suspend fun restore(): SessionInfo? = restoreFlight.join { restoreOnce() }
+
+    private suspend fun restoreOnce(): SessionInfo? {
         val stored = store.current() ?: return null
         return try {
             persist(gateway.restore(stored.profile, stored.token), stored.password)

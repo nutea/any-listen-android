@@ -1,0 +1,4 @@
+<resources>
+    <string name="download_extras_incomplete">音频已保存，封面或歌词暂未保存成功。再次下载这首歌可补齐。</string>
+    <string name="download_legacy_repair">旧版下载文件发生冲突，联网后将重新下载这些歌曲。</string>
+</resources>

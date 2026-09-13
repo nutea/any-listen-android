@@ -1,0 +1,41 @@
+Any Listen Android — Unofficial Android client
+Copyright (c) 2026 Any Listen Android contributors.
+Project: https://github.com/nutea/any-listen-android
+
+This project is independently developed and maintained. It is not an official
+Any Listen release and is not affiliated with, sponsored by, or endorsed by
+the Any Listen team. The upstream name and icon identify compatibility and
+origin; their use does not imply official status or a trademark license.
+
+Except for separately identified third-party material, the original code and
+documentation in this repository are licensed under the custom license in
+LICENSE: based on AGPL v3.0 with additional non-commercial terms. It is not
+unmodified AGPL-3.0 and must not be represented as an OSI-approved license.
+This notice does not replace or amend any license text.
+
+Upstream reference: Any Listen
+https://github.com/any-listen/any-listen
+Tag: webserver-v0.11.0-beta.1
+Commit: e4ef53a5094473687e2d142fb7b63a530436b982
+Protocol behavior was studied to implement this native Kotlin client.
+The upstream launcher PNG is copied without changes to its image bytes;
+Android adaptive-icon configuration adds an inset and background. A reference
+SVG is retained. These resources remain attributable to their upstream rights
+holders. Paths and provenance: third_party/any-listen/README.md.
+Upstream license: third_party/any-listen/LICENSE.
+
+Protocol reference: message2call
+https://github.com/lyswhut/message2call
+Copyright (c) 2018 lyswhut
+MIT License; text retained in third_party/message2call/LICENSE.
+The client implements the request/response frame behavior in Kotlin and does
+not bundle the JavaScript package as an Android runtime dependency.
+
+Other dependencies retain their own licenses and copyright notices.
+See docs/THIRD_PARTY.md and gradle/libs.versions.toml for source references.
+This project's custom license does not relicense those independent components.
+
+This software is provided without warranty as described in LICENSE.
+Music, cover artwork and lyrics supplied by a user's server are not licensed
+by this repository. Commercial permission for upstream material must come
+from the relevant rights holders, not solely from this project's maintainers.
