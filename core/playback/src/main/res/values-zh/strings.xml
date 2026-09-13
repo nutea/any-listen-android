@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_favorite">收藏</string>
+    <string name="session_unfavorite">取消收藏</string>
+    <string name="session_play_mode_list_loop">列表循环</string>
+    <string name="session_play_mode_random">列表随机</string>
+    <string name="session_play_mode_sequence">顺序播放</string>
+    <string name="session_play_mode_single">单曲循环</string>
+</resources>

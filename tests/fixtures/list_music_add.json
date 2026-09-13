@@ -1,0 +1,9 @@
+{
+  "source": "any-listen list_ipc ActionList shape",
+  "action": "list_music_add",
+  "data": {
+    "id": "<redacted-list-id>",
+    "musicInfos": [],
+    "addMusicLocationType": "bottom"
+  }
+}

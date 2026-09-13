@@ -2,12 +2,15 @@
 .env.*
 !.env.example
 local.properties
+keystore.properties
 *.jks
 *.keystore
 *.p12
 *.pem
 secrets/
 captures/private/
+**/__pycache__/
+*.pyc
 .gradle/
 .idea/
 **/build/

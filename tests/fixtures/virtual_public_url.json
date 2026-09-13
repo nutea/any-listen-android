@@ -1,0 +1,19 @@
+{
+  "source": "any-listen@e4ef53a fileSystem + tools.ts + live getMusicUrl",
+  "virtualProtocol": "al-ps-host:",
+  "localMedia": {
+    "example": "al-ps-host:/public/medias/<sha256-filePath>.<ext>",
+    "clientRewrite": "https://<server>/public/medias/<sha256-filePath>.<ext>",
+    "httpPath": "/public/medias/:name"
+  },
+  "proxyCache": {
+    "example": "al-ps-host:/api/p_static/<sha256-name>.<ext>",
+    "clientRewrite": "https://<server>/api/p_static/<sha256-name>.<ext>"
+  },
+  "notes": [
+    "IPC returns the virtual protocol, not an https URL.",
+    "Local media mapping is in-memory and created by getMusicUrl.",
+    "public/medias and p_static do not require cookie p_urlkey.",
+    "p_url requires GET /api/proxyUrlToken then cookie p_urlkey."
+  ]
+}

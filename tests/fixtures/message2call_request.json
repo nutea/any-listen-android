@@ -1,0 +1,4 @@
+{
+  "source": "message2call v2 REQUEST frame",
+  "frame": [0, "getAllUserLists_fixture1", ["getAllUserLists"], [], []]
+}

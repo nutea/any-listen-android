@@ -2,27 +2,43 @@
 
 面向私人 Any Listen 音乐服务的原生安卓客户端。仓库名为 `any-listen-android`，不代表 Any Listen 官方客户端。
 
-## 当前状态
+## 项目信息
 
-2026-09-13：完成开发计划，尚未实现或验证客户端代码。
+- 目标服务：**Any Listen Web Server v0.11.0-beta.1**（源码标签 `webserver-v0.11.0-beta.1` / 提交 `e4ef53a`）。
+- 包名：`io.github.nutea.anylisten`（debug 为 `.debug`）；minSdk 26；compile / target SDK 36。
+- 技术栈：Kotlin、Compose、Media3、Room、OkHttp、DataStore。
+- 服务端是歌单权威；手机保存下载副本、元数据缓存和本机播放队列。联网时可收藏、增删可变歌单中的曲目。
 
-- 用户已部署 **Any Listen Web Server v0.11.0-beta.1**，通过反向代理提供公网 HTTPS。
-- 域名、认证凭据、反代配置、服务器镜像摘要和测试手机尚未提供。
-- 首版单用户、单服务端；原生后台播放和正式离线下载是核心目标。
-- 不将“网页可访问”视作接口、后台播放或下载测试通过。
+闭环：服务器管理自有音乐 → 安卓读取歌单 → 后台播放 → 单曲/列表下载 → 断网后浏览并播放已下载 → 联网刷新库。
 
-## 阅读顺序
+界面：连接页；登录后为音乐库、下载、设置；播放页与迷你播放器。基础展示：歌名、歌手、专辑、封面；有接口时显示 LRC。封面或歌词缺失不阻断播放。
 
-1. [完整开发计划](docs/DEVELOPMENT_PLAN.md)：需求、里程碑、任务和交付标准。
-2. [架构与数据规则](docs/ARCHITECTURE.md)：客户端分层、歌曲身份、播放与离线状态。
-3. [接口验证清单](docs/API_DISCOVERY.md)：Hermes/开发者执行的首个阶段，不包含猜测的 API。
-4. [测试与发布](docs/TEST_RELEASE.md)：验收矩阵、CI、签名、备份与兼容策略。
-5. [执行交接](docs/HANDOFF.md)：从哪里开始、何时可以继续。
+不做：多账号切换、离线改服务端歌单、跨设备进度接力、服务器文件删除或标签编辑、在线音源市场、DRM 绕过、逐字歌词、音效引擎、Android Auto、投屏、应用商店发布。
 
-## 关键约定
+不提交域名、密码、Cookie、令牌、签名密钥或私人音乐。
 
-服务端是音乐库和歌单的权威来源；手机保存下载副本、元数据缓存和自己的队列/进度。首版只在线修改歌单，不实现离线编辑合并、跨设备播放接力或服务器原文件删除。
+## 文档
 
-技术方向：Kotlin、Jetpack Compose、Media3、Room、协程/Flow；具体版本和最低 Android 版本在 M1 固定。此仓库目前只有规划文件，无可运行 APK。
+- [使用说明](docs/USER_GUIDE.md)
+- [架构](docs/ARCHITECTURE.md)
+- [协议](docs/api/PROTOCOL.md) / [能力矩阵](docs/api/COMPATIBILITY.md)
+- [ADR-001 服务端适配](docs/adr/001-server-integration.md) / [ADR-002 下载](docs/adr/002-download-strategy.md)
+- [测试记录](docs/TEST_EVIDENCE.md) / [测试与发布](docs/TEST_RELEASE.md) / [签名发布](docs/RELEASE.md)
+- [第三方与来源](docs/THIRD_PARTY.md)
 
-不提交真实域名配置、密码、Cookie、令牌、签名密钥或私人音乐。生产配置通过本机或 CI 的秘密存储注入。
+## 本地构建
+
+需要 JDK 17 与 Android SDK（平台 36）。
+
+```bash
+echo sdk.dir=C:/Users/YOU/AppData/Local/Android/Sdk> local.properties
+./gradlew testDebugUnitTest :core:model:test assembleDebug
+```
+
+协议探针（凭据只走环境变量或本地 `.env`，已 gitignore）：
+
+```bash
+python tools/probe/probe.py
+```
+
+详见 [tools/probe/README.md](tools/probe/README.md)。

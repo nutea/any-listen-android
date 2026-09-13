@@ -1,0 +1,7 @@
+{
+  "source": "any-listen webserver-v0.11.0-beta.1 constants",
+  "method": "GET",
+  "path": "/api/ipc/hello",
+  "status": 200,
+  "body": "Hello~::^-^::~v1~"
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_favorite">Favorite</string>
+    <string name="session_unfavorite">Remove from favorites</string>
+    <string name="session_play_mode_list_loop">List loop</string>
+    <string name="session_play_mode_random">Shuffle</string>
+    <string name="session_play_mode_sequence">Sequential</string>
+    <string name="session_play_mode_single">Repeat one</string>
+</resources>

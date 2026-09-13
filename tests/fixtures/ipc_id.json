@@ -1,0 +1,8 @@
+{
+  "source": "any-listen webserver-v0.11.0-beta.1 constants",
+  "method": "GET",
+  "path": "/api/ipc/id",
+  "status": 200,
+  "bodyPrefix": "OjppZDo6-",
+  "bodyExample": "OjppZDo6-<redacted-server-id>"
+}
