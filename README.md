@@ -1,6 +1,6 @@
 # Any Listen Android · 非官方客户端
 
-这是作者主要为自用开发的 Android 客户端，围绕**使用自建 [Any Listen](https://github.com/any-listen/any-listen) 管理个人本地音乐文件**这一场景，方便在手机上浏览音乐库、播放歌曲、查看歌词，以及下载后离线收听。
+这是作者主要为自用开发的 Android 客户端，围绕**使用自建 [Any Listen Web Server](https://github.com/any-listen/any-listen-web-server) 管理个人本地音乐文件**这一场景，方便在手机上浏览音乐库、播放歌曲、查看歌词，以及下载后离线收听。
 
 音乐文件由 Any Listen 服务端管理，客户端连接服务端使用这些资源，并保存需要离线收听的副本。功能取舍和维护节奏以作者的实际使用需求为主，公开源码供有相似需求的用户使用和交流。
 
