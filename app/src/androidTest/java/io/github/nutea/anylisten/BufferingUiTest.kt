@@ -25,7 +25,7 @@ class BufferingUiTest {
                 PlayerActions({}, { state.value = state.value.copy(playWhenReady = false, isBuffering = false) }, {}, {}, {}, {}, {}, {}, {}))
         } }
         compose.onNodeWithTag("playback_loading_spinner").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.playback_loading)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.playback_loading)).assertDoesNotExist()
         compose.onNodeWithContentDescription(context.getString(R.string.cd_pause)).performClick()
         compose.onNodeWithTag("playback_loading_spinner").assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.playback_loading)).assertDoesNotExist()
@@ -41,7 +41,8 @@ class BufferingUiTest {
         compose.onNodeWithTag("playback_loading_spinner").assertDoesNotExist()
         compose.runOnIdle { state.value = state.value.copy(isPlaying = false, isBuffering = true) }
         compose.onNodeWithTag("playback_loading_spinner").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.playback_loading)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.playback_loading)).assertDoesNotExist()
+        compose.onNodeWithText(track.artist).assertIsDisplayed()
         compose.onNodeWithContentDescription(context.getString(R.string.cd_pause)).assertIsDisplayed()
         compose.runOnIdle { state.value = state.value.copy(isBuffering = false, playWhenReady = false, error = "Unavailable") }
         compose.onNodeWithTag("playback_loading_spinner").assertDoesNotExist()
