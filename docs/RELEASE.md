@@ -89,3 +89,14 @@ keyPassword=...
 - 仍包含 v0.1.1-beta.1 的网络重连修复。
 - 从 v0.1.0 或任何旧签名 / 未签名安装升级时，须卸载后重装。见 [RELEASE_NOTES_0.1.1-beta.2.md](RELEASE_NOTES_0.1.1-beta.2.md)。
 - 兼容服务端仍为 Any Listen Web Server `0.11.0-beta.1`。
+
+## 测试版 v0.1.1-beta.3
+
+- versionName: 0.1.1-beta.3；versionCode: 6。按冷启动 EncryptedSharedPreferences 失败做了 session store fallback；**未能**解决「连上服务器后崩溃」。见 [RELEASE_NOTES_0.1.1-beta.3.md](RELEASE_NOTES_0.1.1-beta.3.md)。
+- 不要移动或重打 `v0.1.1-beta.3` 标签。
+
+## 测试版 v0.1.1-beta.4
+
+- versionName: 0.1.1-beta.4；versionCode: 7；正式包名不变。
+- 撤回 beta.3 无效的 SecureSessionStore hardening；修复登录/恢复成功后误拆 IPC 导致的闪退。见 [RELEASE_NOTES_0.1.1-beta.4.md](RELEASE_NOTES_0.1.1-beta.4.md)。
+- 保留 beta.1 网络重连修复与 CI 标签签名。不要轮换上传密钥。

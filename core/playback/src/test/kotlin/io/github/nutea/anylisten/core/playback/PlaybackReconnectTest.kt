@@ -59,4 +59,12 @@ class PlaybackReconnectTest {
             ),
         )
     }
+
+    @Test
+    fun rebuildsDeadSocketAlwaysButSkipsHealthyFirstNetworkSignal() {
+        assertTrue(PlaybackReconnect.shouldRebuildSession(gatewayOnline = false, networkChanged = false))
+        assertTrue(PlaybackReconnect.shouldRebuildSession(gatewayOnline = false, networkChanged = true))
+        assertTrue(PlaybackReconnect.shouldRebuildSession(gatewayOnline = true, networkChanged = true))
+        assertFalse(PlaybackReconnect.shouldRebuildSession(gatewayOnline = true, networkChanged = false))
+    }
 }

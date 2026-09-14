@@ -11,7 +11,6 @@
 -keep class androidx.media3.exoplayer.** { *; }
 -keep class androidx.media3.session.** { *; }
 -keep class androidx.datastore.** { *; }
-# Tink / EncryptedSharedPreferences keeps live in :core:data consumer-rules.pro
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn com.google.common.**
