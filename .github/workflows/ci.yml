@@ -5,6 +5,9 @@ on:
     tags:
       - "*"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,3 +28,212 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon :core:model:test :core:data:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+  release:
+    name: sign-and-publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "tools platform-tools build-tools;36.0.0 platforms;android-36"
+      - name: Require Android signing secrets
+        run: |
+          set +x
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub Actions secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Refusing to publish an unsigned release APK. Configure the four signing secrets on this repository."
+            exit 1
+          fi
+      - name: Decode upload keystore
+        run: |
+          set +x
+          python3 <<'PY'
+          import base64
+          import os
+          import sys
+          from pathlib import Path
+
+          def fail(message: str) -> None:
+              print(message, file=sys.stderr)
+              raise SystemExit(1)
+
+          def require(name: str) -> str:
+              value = os.environ.get(name, "")
+              if not value:
+                  fail(f"Missing required GitHub Actions secret: {name}")
+              return value
+
+          raw = require("ANDROID_KEYSTORE_BASE64")
+          try:
+              blob = base64.b64decode(raw, validate=False)
+          except Exception:
+              fail("ANDROID_KEYSTORE_BASE64 is not valid base64.")
+          if not blob:
+              fail("ANDROID_KEYSTORE_BASE64 decoded to an empty keystore.")
+
+          store = Path("secrets") / "upload.jks"
+          store.parent.mkdir(parents=True, exist_ok=True)
+          store.write_bytes(blob)
+          store.chmod(0o600)
+
+          def escape_prop(value: str) -> str:
+              return (
+                  value.replace("\\", "\\\\")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+              )
+
+          props = Path("keystore.properties")
+          props.write_text(
+              "\n".join(
+                  [
+                      "storeFile=secrets/upload.jks",
+                      f"storePassword={escape_prop(require('ANDROID_KEYSTORE_PASSWORD'))}",
+                      f"keyAlias={escape_prop(require('ANDROID_KEY_ALIAS'))}",
+                      f"keyPassword={escape_prop(require('ANDROID_KEY_PASSWORD'))}",
+                      "",
+                  ]
+              ),
+              encoding="utf-8",
+          )
+          props.chmod(0o600)
+          if not store.is_file() or store.stat().st_size == 0:
+              fail("Failed to write secrets/upload.jks")
+          print("Wrote gitignored keystore.properties and secrets/upload.jks")
+          PY
+      - name: Assemble signed release
+        run: |
+          set +x
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:lintRelease :app:assembleRelease
+      - name: Package release artifacts
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +x
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          APK_NAME="any-listen-android-${VERSION}.apk"
+          SOURCE_NAME="any-listen-android-${VERSION}-source.zip"
+          SIGNED="app/build/outputs/apk/release/app-release.apk"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+
+          if [ -f "$UNSIGNED" ] && [ ! -f "$SIGNED" ]; then
+            echo "assembleRelease produced an unsigned APK. Refusing to publish."
+            exit 1
+          fi
+          if [ ! -f "$SIGNED" ]; then
+            echo "Missing signed release APK at ${SIGNED}"
+            exit 1
+          fi
+
+          APKSIGNER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/36.0.0/apksigner"
+          if [ ! -x "$APKSIGNER" ]; then
+            APKSIGNER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner | sort | tail -n 1)"
+          fi
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "apksigner not found; cannot verify the release APK signature."
+            exit 1
+          fi
+          "$APKSIGNER" verify --min-sdk-version 26 "$SIGNED"
+          cp "$SIGNED" "$APK_NAME"
+          git archive --format=zip --prefix="any-listen-android-${VERSION}/" -o "$SOURCE_NAME" HEAD
+
+          python3 <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag[1:] if tag.startswith("v") else tag
+          names = [
+              f"any-listen-android-{version}.apk",
+              f"any-listen-android-{version}-source.zip",
+          ]
+          new_lines = {}
+          for name in names:
+              digest = subprocess.check_output(["sha256sum", name], text=True).strip()
+              new_lines[name] = digest
+
+          existing = []
+          download = subprocess.run(
+              ["gh", "release", "download", tag, "--pattern", "SHA256SUMS.txt", "--output", "SHA256SUMS.old"],
+              capture_output=True,
+              text=True,
+          )
+          old = Path("SHA256SUMS.old")
+          if download.returncode == 0 and old.is_file():
+              for line in old.read_text(encoding="utf-8").splitlines():
+                  stripped = line.strip()
+                  if not stripped or stripped.startswith("#"):
+                      continue
+                  parts = stripped.split()
+                  if len(parts) >= 2 and parts[-1] not in new_lines:
+                      existing.append(stripped)
+
+          Path("SHA256SUMS.txt").write_text(
+              "\n".join([*existing, *new_lines.values()]) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          NOTES="docs/RELEASE_NOTES_${VERSION}.md"
+          if [ -f "$NOTES" ]; then
+            cp "$NOTES" release-body.md
+          else
+            printf 'Any Listen Android %s\n' "$VERSION" > release-body.md
+          fi
+
+          if echo "$VERSION" | grep -Eiq 'beta|rc|alpha'; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+
+          RELEASE_NAME="$(sed -n 's/^# //p' release-body.md | head -n 1)"
+          [ -n "$RELEASE_NAME" ] || RELEASE_NAME="v${VERSION}"
+
+          {
+            echo "version=${VERSION}"
+            echo "apk=${APK_NAME}"
+            echo "source=${SOURCE_NAME}"
+            echo "prerelease=${PRERELEASE}"
+            echo "release_name=${RELEASE_NAME}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.release_name }}
+          body_path: release-body.md
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.meta.outputs.prerelease != 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.meta.outputs.apk }}
+            ${{ steps.meta.outputs.source }}
+            SHA256SUMS.txt
