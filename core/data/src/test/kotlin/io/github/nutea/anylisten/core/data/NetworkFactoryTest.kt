@@ -2,8 +2,10 @@ package io.github.nutea.anylisten.core.data
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,8 +22,16 @@ class NetworkFactoryTest {
 
     @Test
     fun cancelInFlightCallsFailsHungRequests() {
+        val requestStarted = CountDownLatch(1)
+        val releaseServer = CountDownLatch(1)
         val server = MockWebServer()
-        server.enqueue(MockResponse().setBodyDelay(30, TimeUnit.SECONDS).setBody("slow"))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requestStarted.countDown()
+                check(releaseServer.await(5, TimeUnit.SECONDS))
+                return MockResponse().setBody("slow")
+            }
+        }
         server.start()
         try {
             val client = OkHttpClient()
@@ -36,9 +46,11 @@ class NetworkFactoryTest {
                     }
                 },
             )
+            assertTrue(requestStarted.await(2, TimeUnit.SECONDS))
             client.cancelInFlightCalls()
             assertTrue(finished.await(2, TimeUnit.SECONDS))
         } finally {
+            releaseServer.countDown()
             server.shutdown()
         }
     }
