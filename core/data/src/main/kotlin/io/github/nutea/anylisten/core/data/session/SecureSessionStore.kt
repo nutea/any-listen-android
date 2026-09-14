@@ -26,7 +26,8 @@ interface SessionStore {
 }
 
 class SecureSessionStore(context: Context) : SessionStore {
-    private val prefs = openSessionPreferences(context.applicationContext)
+    private val app = context.applicationContext
+    private val prefs = openSessionPreferences(app)
     private val state = MutableStateFlow(read())
     val session: StateFlow<StoredSession?> = state.asStateFlow()
 
@@ -48,6 +49,9 @@ class SecureSessionStore(context: Context) : SessionStore {
 
     override fun clear() {
         prefs.edit().clear().commit()
+        // Logout must also drop leftover plaintext so a later Keystore
+        // failure cannot restore a session the user already ended.
+        discardFallbackSessionStore(app)
         state.value = null
     }
 
@@ -88,7 +92,11 @@ internal const val SESSION_FALLBACK_PREFS_NAME = "session_fallback"
 internal fun openSessionPreferences(context: Context): SharedPreferences {
     val app = context.applicationContext
     return openWithRecovery(
-        create = { encryptedSessionPreferences(app) },
+        create = {
+            encryptedSessionPreferences(app).also {
+                discardFallbackSessionStore(app)
+            }
+        },
         wipe = { wipeEncryptedSession(app) },
         fallback = {
             Log.e(SESSION_STORE_TAG, "Encrypted session prefs unavailable; using private fallback")
@@ -97,6 +105,14 @@ internal fun openSessionPreferences(context: Context): SharedPreferences {
         onFirstFailure = { Log.e(SESSION_STORE_TAG, "Encrypted session prefs failed; wiping and retrying", it) },
         onRetryFailure = { Log.e(SESSION_STORE_TAG, "Encrypted session prefs retry failed", it) },
     )
+}
+
+internal fun discardFallbackSessionStore(context: Context) {
+    context.getSharedPreferences(SESSION_FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .clear()
+        .commit()
+    context.deleteSharedPreferences(SESSION_FALLBACK_PREFS_NAME)
 }
 
 internal fun <T> openWithRecovery(
