@@ -1,18 +1,39 @@
 package io.github.nutea.anylisten.core.data.gateway
 
+import io.github.nutea.anylisten.core.data.connection.IpcAuthenticator
 import io.github.nutea.anylisten.core.model.AppError
 import io.github.nutea.anylisten.core.model.ErrorKind
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import io.github.nutea.anylisten.core.model.ServerProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLDecoder
 import java.security.MessageDigest
 import java.util.UUID
 
 class IpcAuthClient(
     private val http: OkHttpClient,
-) {
+) : IpcAuthenticator {
+    override suspend fun signIn(baseUrl: String, password: String): SessionInfo =
+        withContext(Dispatchers.IO) { login(baseUrl, password) }
+
+    override suspend fun resume(profile: ServerProfile, token: String): SessionInfo =
+        withContext(Dispatchers.IO) { restore(profile, token) }
+
+    override suspend fun primeStreamToken(session: SessionInfo) {
+        withContext(Dispatchers.IO) {
+            val token = java.net.URLEncoder.encode(session.token, Charsets.UTF_8.name())
+            val request = Request.Builder()
+                .url(UrlNormalizer.resolve(session.profile.baseUrl, "${ProtocolConstants.PROXY_TOKEN_PATH}?m=$token"))
+                .get()
+                .build()
+            http.newCall(request).execute().close()
+        }
+    }
+
     fun login(baseUrl: String, password: String): SessionInfo {
         val base = UrlNormalizer.httpsBase(baseUrl)
         val serverId = readServerId(base)
@@ -71,7 +92,7 @@ class IpcAuthClient(
         }
         val token = response.header("token").orEmpty()
         if (token.isBlank()) throw AppError(ErrorKind.AUTH_FAILED, "Missing session token")
-        val serverName = java.net.URLDecoder.decode(lines.getOrNull(1).orEmpty(), Charsets.UTF_8)
+        val serverName = URLDecoder.decode(lines.getOrNull(1).orEmpty(), Charsets.UTF_8.name())
         return SessionInfo(
             profile = ServerProfile(
                 id = serverId.ifBlank { UUID.randomUUID().toString() },

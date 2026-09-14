@@ -61,10 +61,16 @@ class PlaybackReconnectTest {
     }
 
     @Test
-    fun rebuildsDeadSocketAlwaysButSkipsHealthyFirstNetworkSignal() {
-        assertTrue(PlaybackReconnect.shouldRebuildSession(gatewayOnline = false, networkChanged = false))
-        assertTrue(PlaybackReconnect.shouldRebuildSession(gatewayOnline = false, networkChanged = true))
-        assertTrue(PlaybackReconnect.shouldRebuildSession(gatewayOnline = true, networkChanged = true))
-        assertFalse(PlaybackReconnect.shouldRebuildSession(gatewayOnline = true, networkChanged = false))
+    fun aStalledBufferOnAStableNetworkIsLeftAlone() {
+        // Deciding whether the *session* must be rebuilt now belongs to ConnectionPlanner; the
+        // player only escalates a stall it cannot explain as ordinary slowness.
+        assertFalse(
+            PlaybackReconnect.shouldRecoverStalledBuffer(
+                stillBuffering = true,
+                playWhenReady = true,
+                gatewayOnline = true,
+                msSinceNetworkChange = Long.MAX_VALUE,
+            ),
+        )
     }
 }

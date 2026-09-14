@@ -16,6 +16,10 @@ data class StoredSession(
 
 interface SessionStore {
     fun current(): StoredSession?
+
+    /** Emits on every save and clear so the connection manager can react to credential changes. */
+    val changes: StateFlow<StoredSession?>
+
     fun save(profile: ServerProfile, token: String, password: String? = null)
     fun clear()
 }
@@ -30,6 +34,8 @@ class SecureSessionStore(context: Context) : SessionStore {
     )
     private val state = MutableStateFlow(read())
     val session: StateFlow<StoredSession?> = state.asStateFlow()
+
+    override val changes: StateFlow<StoredSession?> = session
 
     override fun current(): StoredSession? = state.value
 

@@ -4,12 +4,9 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import androidx.media3.common.PlaybackException
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -38,11 +35,12 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.github.nutea.anylisten.core.data.AppContainer
+import io.github.nutea.anylisten.core.data.AppScopes
+import io.github.nutea.anylisten.core.data.connection.ConnectionState
 import io.github.nutea.anylisten.core.model.PlaybackMode
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import io.github.nutea.anylisten.core.model.RepeatMode
 import io.github.nutea.anylisten.core.model.Track
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -67,7 +65,8 @@ data class PendingPlayback(
 
 class PlaybackService : MediaSessionService() {
     private val job = SupervisorJob()
-    private val scope = CoroutineScope(job + Dispatchers.Main.immediate)
+    // A failed maintenance coroutine must never take the music player's process with it.
+    private val scope = AppScopes.create("playback", Dispatchers.Main.immediate, job)
     private var player: ExoPlayer? = null
     private var session: MediaSession? = null
     private var cache: SimpleCache? = null
@@ -75,8 +74,8 @@ class PlaybackService : MediaSessionService() {
     private var playJob: Job? = null
     private var reconnectJob: Job? = null
     private var bufferingWatch: Job? = null
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetworkChangeAt = 0L
+    private var lastPrepareAt = 0L
     private val tracksByKey = ConcurrentHashMap<String, Track>()
     private val laterKeys = linkedSetOf<String>()
     private var priority: PriorityQueue? = null
@@ -100,10 +99,9 @@ class PlaybackService : MediaSessionService() {
             StandaloneDatabaseProvider(this),
         )
         cache = simpleCache
-        // A streaming response may remain open for the duration of the song.
-        // Keep connect/read timeouts, but do not apply the API client's whole-call deadline.
-        val playbackHttp = container.http.newBuilder().callTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS).build()
-        val okHttpFactory = OkHttpDataSource.Factory(playbackHttp)
+        // Media has its own OkHttp dispatcher: clearing out API calls after a handover must not
+        // abort the audio stream, and aborting the stream must not abort the reconnect.
+        val okHttpFactory = OkHttpDataSource.Factory(container.mediaHttp)
         val upstream = DefaultDataSource.Factory(this, okHttpFactory)
         val cacheFactory = CacheDataSource.Factory()
             .setCache(simpleCache)
@@ -123,7 +121,7 @@ class PlaybackService : MediaSessionService() {
                 val track = spec.customData as? Track
                 if (track == null) file.delete() else {
                     val save = scope.launch(Dispatchers.IO) {
-                        container.offlineAssets.adoptStream(track, spec.uri.toString(), file, token)
+                        runCatching { container.offlineAssets.adoptStream(track, spec.uri.toString(), file, token) }
                     }
                     save.invokeOnCompletion { file.delete() }
                 }
@@ -133,11 +131,15 @@ class PlaybackService : MediaSessionService() {
             val key = PlaybackUris.cacheKey(spec.uri) ?: return@Factory spec
             val track = tracksByKey[key] ?: throw IOException("Unknown track")
             val resolver = Holder.resolver ?: throw IOException("No resolver")
+            // Runs on a Media3 loading thread. It may block: the resolver waits for a reconnect
+            // in progress so an uncached track can re-resolve across a handover instead of
+            // failing the load. Everything that leaves here must be an IOException, or Media3
+            // reports a fatal error instead of retrying.
             val resource = try {
                 runBlocking { resolver.resolve(track) }
             } catch (error: IOException) {
                 throw error
-            } catch (error: Exception) {
+            } catch (error: Throwable) {
                 throw IOException(error.message ?: "Media resolve failed", error)
             }
             spec.buildUpon().setUri(android.net.Uri.parse(resource.url)).setKey(resolver.cacheKey(track,resource)).setCustomData(track).build()
@@ -207,7 +209,7 @@ class PlaybackService : MediaSessionService() {
         session = sessionBuilder.build()
         Holder.service = this
         Holder.resolver = PlaybackResolver(container.downloads, container.gateway, container.offlineAssets)
-        watchNetwork()
+        watchSession()
         consumePending()
         scope.launch {
             while (isActive) {
@@ -228,9 +230,6 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onDestroy() {
-        networkCallback?.let { callback ->
-            runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(callback) }
-        }
         val finalState = snapshot()
         if (finalState != null) runBlocking {
             (application as ContainerHolder).container.settings.setPlayback(finalState)
@@ -304,40 +303,44 @@ class PlaybackService : MediaSessionService() {
         savePlayback()
     }
 
-    private fun watchNetwork() {
-        val cm = getSystemService(ConnectivityManager::class.java)
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            private var usable: Network? = null
-            private var observedDefaultNetwork = false
-            override fun onLost(network: Network) {
-                if (usable != network) return
-                usable = null
-                lastNetworkChangeAt = SystemClock.elapsedRealtime()
-                val container = (application as ContainerHolder).container
-                container.dropStaleConnections()
-                container.cancelInFlightCalls()
-            }
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
-                    if (usable == network) {
-                        usable = null
-                        lastNetworkChangeAt = SystemClock.elapsedRealtime()
-                    }
-                    return
-                }
-                if (usable == network) return
-                val networkChanged = observedDefaultNetwork
-                usable = network
-                observedDefaultNetwork = true
-                lastNetworkChangeAt = SystemClock.elapsedRealtime()
-                val container = (application as ContainerHolder).container
-                if (PlaybackReconnect.shouldRebuildSession(container.gateway.isOnline(), networkChanged)) {
-                    scope.launch { recoverConnection() }
-                }
-            }
+    /**
+     * Playback follows the shared connection state instead of registering a second
+     * `ConnectivityManager` callback and running a second restore loop. Deciding *when* to
+     * reconnect is the connection manager's job; this only reacts to the socket it gets.
+     */
+    private fun watchSession() {
+        val container = (application as ContainerHolder).container
+        scope.launch {
+            // StateFlow already conflates equal values, so this fires once per real transition.
+            container.network.status.collect { lastNetworkChangeAt = SystemClock.elapsedRealtime() }
         }
-        networkCallback = callback
-        cm.registerDefaultNetworkCallback(callback)
+        scope.launch {
+            container.connection.state
+                .map { (it as? ConnectionState.Online)?.generation ?: 0L }
+                .distinctUntilChanged()
+                .collect { generation -> if (generation != 0L) onSessionEstablished() }
+        }
+    }
+
+    /**
+     * A new socket exists. Previously resolved stream URLs belong to the session that is gone, so
+     * they are invalidated and the timeline is replayed from its current position.
+     */
+    private fun onSessionEstablished() {
+        Holder.resolver?.invalidateRemoteUrls()
+        cacheCurrentTrack()
+        replayTimeline()
+    }
+
+    /** `prepare()` preserves position and `playWhenReady`, including a user's pause. */
+    private fun replayTimeline(force: Boolean = false) {
+        val exo = player ?: return
+        if (exo.mediaItemCount == 0) return
+        if (!force && !PlaybackReconnect.shouldReplayTimeline(exo.playerError != null, exo.playbackState, exo.playWhenReady)) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastPrepareAt < MIN_PREPARE_INTERVAL_MS) return
+        lastPrepareAt = now
+        exo.prepare()
     }
 
     private fun watchBuffering(playbackState: Int) {
@@ -365,60 +368,32 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    /** Rebuild the IPC session and expired URLs before preparing the failed timeline. */
+    /**
+     * Ask for a session and replay what can already play.
+     *
+     * The retry loop that used to live here — its own backoff, its own `session.restore()`, its
+     * own view of whether the network was usable — is gone. There is one reconnect policy, in
+     * the connection manager, and [watchSession] reacts when it succeeds.
+     */
     fun recoverConnection(playRequested: Boolean = false) {
         val exo = player ?: return
         if (playRequested) exo.playWhenReady = true
+        val container = (application as ContainerHolder).container
+        container.connection.requestConnect()
+        if (playRequested) {
+            // Explicit user intent: prepare now so the resolver starts waiting for the session.
+            replayTimeline(force = true)
+            return
+        }
         if (reconnectJob?.isActive == true) return
         reconnectJob = scope.launch {
-            val container = (application as ContainerHolder).container
-            container.dropStaleConnections()
             val current = currentTrack()
-            if (current != null && (container.downloads.completedFile(current.cacheKey) != null ||
-                    container.offlineAssets.audioFile(current.cacheKey) != null)) {
-                if (PlaybackReconnect.shouldReplayTimeline(exo.playerError != null, exo.playbackState, exo.playWhenReady)) {
-                    exo.prepare()
-                }
-                // Local playback can recover immediately; still restore the network session below.
-            }
-            var backoff = 1_000L
-            while (isActive && container.sessionStore.current() != null) {
-                if (!hasUsableNetwork()) {
-                    delay(backoff)
-                    backoff = (backoff * 2).coerceAtMost(30_000L)
-                    continue
-                }
-                delay(500L)
-                val restored = try {
-                    withContext(Dispatchers.IO) {
-                        withTimeoutOrNull(30_000L) { container.session.restore() }
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) { null }
-                if (restored != null) {
-                    container.http.connectionPool.evictAll()
-                    Holder.resolver?.invalidateRemoteUrls()
-                    cacheCurrentTrack()
-                    if (exo.mediaItemCount > 0 &&
-                        PlaybackReconnect.shouldReplayTimeline(exo.playerError != null, exo.playbackState, exo.playWhenReady)
-                    ) {
-                        // prepare preserves position and playWhenReady, including a user's pause.
-                        exo.prepare()
-                    }
-                    return@launch
-                }
-                delay(backoff)
-                backoff = (backoff * 2).coerceAtMost(30_000L)
-            }
+            val playableOffline = current != null && (
+                container.downloads.completedFile(current.cacheKey) != null ||
+                    container.offlineAssets.audioFile(current.cacheKey) != null
+                )
+            if (playableOffline || container.isConnected()) replayTimeline()
         }
-    }
-
-    private fun hasUsableNetwork(): Boolean {
-        val cm = getSystemService(ConnectivityManager::class.java)
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     fun playbackOrderKeys(): List<String> = player?.playbackOrderKeys().orEmpty()
@@ -664,6 +639,7 @@ class PlaybackService : MediaSessionService() {
     companion object Holder {
         const val COMMAND_FAVORITE = "io.github.nutea.anylisten.FAVORITE"
         const val COMMAND_PLAY_MODE = "io.github.nutea.anylisten.PLAY_MODE"
+        private const val MIN_PREPARE_INTERVAL_MS = 2_000L
         var service: PlaybackService? = null
         var resolver: PlaybackResolver? = null
         val pendingPlay = AtomicReference<PendingPlayback?>(null)

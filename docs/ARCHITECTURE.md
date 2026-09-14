@@ -14,7 +14,22 @@ UI / ViewModel → Repository → `AnyListenGateway` / Room / 下载协调器。
 
 `PlaybackService` 持有唯一 Player 和 MediaSession；Activity 不管理播放器生死。`DownloadCoordinator` 管理正式下载，`PlaybackResolver` 选择有效本地副本或远程资源。首次播放通过 `PendingPlayback` 交给服务。系统媒体卡片上的收藏与播放模式是 MediaSession 自定义按钮，不把歌词写进锁屏元数据。
 
-`AnyListenGateway` 抽象：认证、列表、曲目、媒体解析、收藏 / 歌单、事件。方法名是客户端能力，不是服务器路由。UI 不依赖协议原始 DTO。
+`AnyListenGateway` 抽象：列表、曲目、媒体解析、收藏 / 歌单。方法名是客户端能力，不是服务器路由。UI 不依赖协议原始 DTO。网关只会向**已经存在的会话**提要求，它不拥有套接字，也不做认证。
+
+## 连接与会话（core/data/connection）
+
+会话只有一个所有者：`SessionConnectionManager`。它用单条协程顺序消费事件，因此「两处回调各自重连」「将死的套接字拆掉继任者」这类交错无法表达。
+
+| 组件 | 职责 |
+|---|---|
+| `NetworkMonitor` | 全进程唯一的 `registerDefaultNetworkCallback`，把重复、乱序的系统回调归约成稳定的 `NetworkSnapshot` |
+| `NetworkIdentityTracker` | 给每个默认网络分配身份；网络丢失后身份作废，避免复用的 net id 被误认成旧链路 |
+| `ConnectionPlanner` | 纯函数归约：`(model, event) -> (model, action)`，重连策略全部集中在此，可穷举测试 |
+| `SessionConnectionManager` | 事件循环、认证与重登回退、指数退避、套接字所有权 |
+| `IpcChannel` | 一代套接字 + 一个 `Message2Call`；不可变，重连只替换不修改 |
+| `HttpClients` | API 与音频两个 OkHttp 客户端，共享连接池与 Cookie，各自独立 dispatcher |
+
+规则：健康会话不因系统回调而重建；网络身份真的变化才重建；链路抖动后回到同一网络先探活；任何来自旧世代的回调一律忽略。UI 与播放都只观察 `ConnectionState`，不自己发起重连循环。
 
 ## 数据模型
 

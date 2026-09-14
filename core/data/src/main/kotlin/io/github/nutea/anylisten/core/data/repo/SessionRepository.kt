@@ -1,63 +1,34 @@
 package io.github.nutea.anylisten.core.data.repo
 
-import io.github.nutea.anylisten.core.data.gateway.AnyListenGateway
+import io.github.nutea.anylisten.core.data.connection.ConnectionState
+import io.github.nutea.anylisten.core.data.connection.SessionConnectionManager
 import io.github.nutea.anylisten.core.data.gateway.SessionInfo
-import io.github.nutea.anylisten.core.data.session.SessionStore
-import io.github.nutea.anylisten.core.data.session.StoredSession
-import io.github.nutea.anylisten.core.model.AppError
-import io.github.nutea.anylisten.core.model.ErrorKind
+import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * App-facing view of the server session.
+ *
+ * Deduplication, the re-login fallback and the reconnect policy all live in
+ * [SessionConnectionManager] now, so this is a thin, intention-revealing wrapper rather than a
+ * second place where connection decisions are made.
+ */
 class SessionRepository(
-    private val store: SessionStore,
-    private val gateway: AnyListenGateway,
-    private val afterAuth: suspend () -> Unit = {},
+    private val connection: SessionConnectionManager,
 ) {
-    suspend fun login(baseUrl: String, password: String): SessionInfo {
-        val info = gateway.login(baseUrl, password)
-        store.save(info.profile, info.token, password)
-        runCatching { afterAuth() }
-        return info
-    }
+    val state: StateFlow<ConnectionState> = connection.state
+    val session: StateFlow<SessionInfo?> = connection.session
 
-    private val restoreFlight = SingleFlight<SessionInfo?>()
+    suspend fun login(baseUrl: String, password: String): SessionInfo =
+        connection.signIn(baseUrl, password)
 
-    suspend fun restore(): SessionInfo? = restoreFlight.join { restoreOnce() }
+    /**
+     * Ensure a session exists. Returns the live one when the socket is already healthy, null when
+     * there is nothing stored to connect with, and throws the underlying error otherwise.
+     */
+    suspend fun restore(): SessionInfo? = connection.ensureConnected()
 
-    private suspend fun restoreOnce(): SessionInfo? {
-        val stored = store.current() ?: return null
-        return try {
-            persist(gateway.restore(stored.profile, stored.token), stored.password)
-        } catch (error: AppError) {
-            if (error.kind == ErrorKind.AUTH_FAILED || error.kind == ErrorKind.SESSION_EXPIRED) {
-                reauth(stored)
-            } else {
-                null
-            }
-        }
-    }
+    suspend fun logout() = connection.signOut()
 
-    suspend fun logout() {
-        runCatching { gateway.logout() }
-        store.clear()
-    }
-
-    private suspend fun reauth(stored: StoredSession): SessionInfo {
-        if (stored.password.isBlank()) {
-            throw AppError(ErrorKind.AUTH_FAILED, "Session expired")
-        }
-        return try {
-            persist(gateway.login(stored.profile.baseUrl, stored.password), stored.password)
-        } catch (error: AppError) {
-            if (error.kind == ErrorKind.AUTH_FAILED) {
-                store.clear()
-            }
-            throw error
-        }
-    }
-
-    private suspend fun persist(info: SessionInfo, password: String): SessionInfo {
-        store.save(info.profile, info.token, password)
-        runCatching { afterAuth() }
-        return info
-    }
+    /** Nudge the manager without waiting; used by UI and playback recovery paths. */
+    fun requestConnect() = connection.requestConnect()
 }
