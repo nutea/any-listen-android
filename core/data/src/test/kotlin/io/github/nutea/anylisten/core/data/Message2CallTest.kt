@@ -90,6 +90,7 @@ class Message2CallTest {
                 client.destroy("closed")
             }
             job.await()
+            Unit
         }
     }
 }
