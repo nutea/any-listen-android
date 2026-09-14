@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Install APKs on a booted emulator, cold-start MainActivity, and capture logcat.
+# Usage: emulator-launch.sh repro|verify
+# repro  — install shipped beta.2, cold-start, write beta2-logcat.txt (never fails the job)
+# verify — install this revision's minified release APK and require the process to stay up
 set -euo pipefail
 
+MODE="${1:-repro}"
 ACTIVITY=io.github.nutea.anylisten.MainActivity
 RELEASE_PKG=io.github.nutea.anylisten
+BETA2_URL=https://github.com/nutea/any-listen-android/releases/download/v0.1.1-beta.2/any-listen-android-0.1.1-beta.2.apk
 
 dump_logcat() {
   local out="$1"
@@ -39,27 +43,37 @@ start_and_watch() {
   return 0
 }
 
-echo "== Repro shipped v0.1.1-beta.2 (expected crash; do not fail the job) =="
-curl -fsSL -o /tmp/beta2.apk \
-  https://github.com/nutea/any-listen-android/releases/download/v0.1.1-beta.2/any-listen-android-0.1.1-beta.2.apk
-adb install -r -t /tmp/beta2.apk
-set +e
-start_and_watch "$RELEASE_PKG" beta2-logcat.txt
-beta2_rc=$?
-set -e
-if [ "$beta2_rc" -eq 0 ]; then
-  echo "NOTE: beta.2 stayed alive on this emulator; crash may be device-specific."
-else
-  echo "beta.2 died or threw FATAL. Stack is in beta2-logcat.txt"
-fi
-adb uninstall "$RELEASE_PKG" || true
+repro_beta2() {
+  echo "== Repro shipped v0.1.1-beta.2 (expected crash; do not fail the job) =="
+  curl -fsSL -o /tmp/beta2.apk "$BETA2_URL"
+  adb install -r -t /tmp/beta2.apk
+  set +e
+  start_and_watch "$RELEASE_PKG" beta2-logcat.txt
+  local rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    echo "NOTE: beta.2 stayed alive on this emulator; crash may be device-specific."
+  else
+    echo "beta.2 died or threw FATAL. Stack is in beta2-logcat.txt"
+    extract_fatal beta2-logcat.txt
+  fi
+  adb uninstall "$RELEASE_PKG" || true
+}
 
-echo "== Verify this revision's minified release APK =="
-APK=app/build/outputs/apk/release/app-release.apk
-if [ ! -f "$APK" ]; then
-  echo "Missing ${APK}"
-  exit 1
-fi
-adb install -r -t "$APK"
-start_and_watch "$RELEASE_PKG" fixed-logcat.txt
-echo "minified release stayed up"
+verify_fix() {
+  echo "== Verify this revision's minified release APK =="
+  local apk=app/build/outputs/apk/release/app-release.apk
+  if [ ! -f "$apk" ]; then
+    echo "Missing ${apk}"
+    exit 1
+  fi
+  adb install -r -t "$apk"
+  start_and_watch "$RELEASE_PKG" fixed-logcat.txt
+  echo "minified release stayed up"
+}
+
+case "$MODE" in
+  repro) repro_beta2 ;;
+  verify) verify_fix ;;
+  *) echo "usage: $0 repro|verify" >&2; exit 2 ;;
+esac

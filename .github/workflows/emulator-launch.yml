@@ -22,7 +22,37 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :core:model:test :core:data:testDebugUnitTest :app:lintDebug
 
-  launch:
+  repro-beta2:
+    name: beta.2 crash logcat
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Make launch script executable
+        run: chmod +x .github/scripts/emulator-launch.sh
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: aosp_atd
+          arch: x86_64
+          force-avd-creation: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: .github/scripts/emulator-launch.sh repro
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beta2-logcat
+          path: beta2-logcat.txt
+          if-no-files-found: warn
+
+  verify-fix:
+    name: minified release stays up
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,12 +80,10 @@ jobs:
           force-avd-creation: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
-          script: .github/scripts/emulator-launch.sh
+          script: .github/scripts/emulator-launch.sh verify
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: emulator-logcat
-          path: |
-            beta2-logcat.txt
-            fixed-logcat.txt
+          name: fixed-logcat
+          path: fixed-logcat.txt
           if-no-files-found: warn
