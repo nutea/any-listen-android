@@ -43,7 +43,7 @@ fun PlaylistScreen(vm: AppViewModel, onBack: () -> Unit, onSearch: () -> Unit, o
     val player by vm.player.collectAsState()
     val downloadedKeys = downloadedTrackKeys(vm)
     LibraryContent(state, player.track?.cacheKey, vm::artworkUrl, vm::isFavorite, vm::selectPlaylist,
-        vm::updateQuery, vm::refresh, { if (canInteract()) vm.play(state.filtered) }, { if (canInteract()) vm.requestDownload(state.filtered.filterNot { it.cacheKey in downloadedKeys }) },
+        vm::updateQuery, vm::refresh, { if (canInteract()) vm.play(state.filtered, sourceListId = state.selected?.id) }, { if (canInteract()) vm.requestDownload(state.filtered.filterNot { it.cacheKey in downloadedKeys }) },
         vm::isAvailableOffline, vm::setSort,
         onBack = onBack, onSearch = onSearch, isPlaying = player.isPlaying, downloaded = { it.cacheKey in downloadedKeys },
         onBatch = { tracks, action ->
@@ -57,7 +57,7 @@ fun PlaylistScreen(vm: AppViewModel, onBack: () -> Unit, onSearch: () -> Unit, o
         },
     ) { track, action ->
         if (canInteract()) when (action) {
-            TrackAction.PLAY -> if (player.track?.cacheKey == track.cacheKey) onOpenPlayer() else vm.play(state.filtered, track)
+            TrackAction.PLAY -> if (player.track?.cacheKey == track.cacheKey) onOpenPlayer() else vm.play(state.filtered, track, sourceListId = state.selected?.id)
             TrackAction.FAVORITE -> vm.toggleFavorite(track)
             TrackAction.ADD -> vm.startAddToPlaylist(track)
             TrackAction.REMOVE -> vm.removeFromSelected(track)
@@ -185,7 +185,7 @@ fun LibraryContent(
                                 DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                                     Text(stringResource(R.string.sort_local_only), style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                                    TrackSortField.entries.forEach { field ->
+                                    sortFields(state.selected?.id).forEach { field ->
                                         DropdownMenuItem(
                                             text = { Text(sortLabel(field, state.sort == field, state.sortAscending)) },
                                             onClick = { onSort(field); sortMenu = false },
@@ -236,8 +236,18 @@ fun LibraryContent(
                 }
             }
             if (state.filtered.isEmpty()) item {
-                EmptyContent(Icons.Default.SearchOff, stringResource(R.string.no_tracks_title),
-                    stringResource(if (state.query.isBlank()) R.string.playlist_empty_detail else R.string.search_empty_detail))
+                val lastPlayed = state.selected?.id == ProtocolConstants.LIST_LAST_PLAYED && state.query.isBlank()
+                EmptyContent(
+                    if (lastPlayed) Icons.Default.History else Icons.Default.SearchOff,
+                    stringResource(if (lastPlayed) R.string.list_last_played else R.string.no_tracks_title),
+                    stringResource(
+                        when {
+                            state.query.isNotBlank() -> R.string.search_empty_detail
+                            lastPlayed -> R.string.last_played_empty_detail
+                            else -> R.string.playlist_empty_detail
+                        },
+                    ),
+                )
             }
             items(state.filtered, key = { it.cacheKey }, contentType = { "track" }) { track ->
                 val selected = track.cacheKey == currentKey
@@ -328,12 +338,20 @@ fun LibraryContent(
     }
 }
 
+private fun sortFields(playlistId: String?): List<TrackSortField> =
+    if (playlistId == ProtocolConstants.LIST_LAST_PLAYED) {
+        listOf(TrackSortField.PLAY_TIME) + TrackSortField.entries.filter { it != TrackSortField.PLAY_TIME }
+    } else {
+        TrackSortField.entries.filter { it != TrackSortField.PLAY_TIME }
+    }
+
 @Composable
 private fun sortLabel(field: TrackSortField, selected: Boolean, ascending: Boolean): String {
     val name = stringResource(when (field) {
         TrackSortField.TITLE -> R.string.sort_title
         TrackSortField.ARTIST -> R.string.sort_artist
         TrackSortField.ALBUM -> R.string.sort_album
+        TrackSortField.PLAY_TIME -> R.string.sort_play_time
     })
     if (!selected) return name
     return name + if (ascending) " ↑" else " ↓"

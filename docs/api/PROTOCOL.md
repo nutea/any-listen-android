@@ -77,10 +77,22 @@ RESPONSE = [1, eventName, null, result] | [1, eventName, {message, stack?}]
 | `getMusicUrl` | `{ musicInfo, isRefresh?, quality? }` | `{ url, quality, isFromCache }` | 播放/下载 |
 | `getMusicPic` | `{ musicInfo, isRefresh? }` | `{ url, isFromCache }` | 封面 |
 | `getMusicLyric` | `{ musicInfo, isRefresh? }` | `{ info: { lyric, awlyric?, tlyric?, ... }, isFromCache }` | 基础 LRC |
-| `listAction` | `{ action, data }` | void | 收藏/增删 |
+| `getSetting` | 无 | 扁平 `AppSetting`（键如 `list.addMusicLocationType`） | 最近播放插入位置，默认 `top` |
+| `listAction` | `{ action, data }` | void | 收藏/增删；最近播放另用 `list_music_update_position` |
 | `checkListExistMusic` | `listId, musicId` | boolean | 写后确认 |
 
 内置列表 ID：`default`、`love`、`last_played`。
+
+### 最近播放（`last_played`）
+
+Web 播放器在当前曲目变化时（`playerEvent` / `musicChanged`）由 **web-server** `updateLatestPlayList` 写入该列表，不是独立的 REST 接口。服务端逻辑（any-listen@e4ef53a `packages/web-server/src/app/modules/player/index.ts`）：
+
+- 若当前队列来自 `last_played` 本身，则不写入（避免在最近播放里点播再把自己顶到最前）。
+- 已存在：`list_music_update_position` 移到最新位置。
+- 不存在：`list_music_add`，并在 `meta.createTime` 写入 `Date.now()`；超过 **1000** 首时 `list_music_remove` 丢掉最旧的一首。
+- 最新位置由设置 `list.addMusicLocationType` 决定，**默认 `top`**（下标 0 为最新）。`createTime` 只在首次插入时设置，复播只改位置，因此 **列表顺序才是播放时间顺序**。
+
+本客户端使用独立 Media3 队列，不调用 `playListAction` / `playerEvent`，以免覆盖 Web 正在使用的共享播放队列。写入路径与服务端相同：对 `last_played` 发上述 `listAction`。读取仍走 `getAllUserLists` + `getListMusics('last_played')`。界面默认按播放时间从新到旧；空列表有独立空态。用户不可从菜单手动增删该列表（`canMutateOnline = false`）。
 
 ### MusicInfo（字段名来自源码类型）
 
@@ -127,9 +139,11 @@ https://<base>/api/p_url/<name>
 ```
 { "action": "list_music_add", "data": { "id": "<listId>", "musicInfos": [MusicInfo], "addMusicLocationType": "bottom" } }
 { "action": "list_music_remove", "data": { "listId": "<listId>", "ids": ["<musicInfo.id>"] } }
+{ "action": "list_music_update_position", "data": { "listId": "last_played", "position": 0, "ids": ["<musicInfo.id>"] } }
 ```
 
 源码还存在 `list_music_overwrite` / `list_data_overwrite`。本客户端 **不调用**，避免覆盖其它设备修改。
+最近播放写入使用与 web-server `updateLatestPlayList` 相同的 `list_music_add` / `list_music_update_position` / `list_music_remove`（仅针对 `last_played`）。
 写操作：超时先 `getListMusics` 再决定是否重试；成功后再读一次确认。测试写只允许独立测试歌单。
 
 ## 错误分类

@@ -62,4 +62,32 @@ class LibraryNavigationTest {
         compose.onNodeWithText(first.title).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.library_search_start)).assertIsDisplayed()
     }
+
+    @Test fun lastPlayedShowsNewestFirstAndEmptyState() {
+        val older = Track(TrackIdentity("fixture", "old"), "AAA Song", "Artist", "Album", 1000)
+        val newer = Track(TrackIdentity("fixture", "new"), "ZZZ Song", "Artist", "Album", 1000)
+        val playlist = Playlist("last_played", "Recently played", "last_played", 2, canMutateOnline = false)
+        val filled = LibraryUiState(
+            snapshot = LibrarySnapshot(listOf(playlist), mapOf("last_played" to listOf(newer, older)), 1, false),
+            selected = playlist,
+            filtered = listOf(newer, older),
+            sort = TrackSortField.PLAY_TIME,
+            sortAscending = false,
+        )
+        var played: Track? = null
+        show { LibraryContent(filled, null, { null }, { false }, {}, {}, {}, {}, {}) { track, action -> if (action == TrackAction.PLAY) played = track } }
+        val newerTop = compose.onNodeWithTag("song_${newer.cacheKey}").fetchSemanticsNode().boundsInRoot.top
+        val olderTop = compose.onNodeWithTag("song_${older.cacheKey}").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(newerTop < olderTop)
+        compose.onNodeWithTag("song_${newer.cacheKey}").performClick()
+        compose.runOnIdle { assertEquals(newer, played) }
+        val empty = filled.copy(
+            snapshot = filled.snapshot.copy(tracksByPlaylist = mapOf("last_played" to emptyList()), playlists = listOf(playlist.copy(trackCount = 0))),
+            filtered = emptyList(),
+        )
+        show { LibraryContent(empty, null, { null }, { false }, {}, {}, {}, {}, {}) { _, _ -> } }
+        compose.onAllNodesWithText(context.getString(R.string.list_last_played)).onFirst().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.last_played_empty_detail)).assertIsDisplayed()
+        screenshot("last-played-empty")
+    }
 }

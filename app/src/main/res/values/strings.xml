@@ -92,6 +92,7 @@
     <string name="library_empty_title">Your library starts here</string>
     <string name="no_tracks_title">No tracks here yet</string>
     <string name="playlist_empty_detail">Add music to this playlist in Web, then refresh.</string>
+    <string name="last_played_empty_detail">Play a song and it will show up here, newest first.</string>
     <string name="search_empty_detail">Try a different title, artist or album.</string>
     <string name="no_playlist_targets">No editable playlists available.</string>
     <string name="track_options">Options for %1$s</string>
@@ -156,6 +157,7 @@
     <string name="sort_title">Title</string>
     <string name="sort_artist">Artist</string>
     <string name="sort_album">Album</string>
+    <string name="sort_play_time">Play time</string>
     <string name="selection_count">%1$d selected · %2$d in this list</string>
     <string name="selection_scope">Selection applies to the current playlist view</string>
     <string name="clear_selection">Exit selection</string>

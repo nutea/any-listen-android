@@ -2,6 +2,7 @@ package io.github.nutea.anylisten.core.data
 
 import io.github.nutea.anylisten.core.data.gateway.IpcAuthClient
 import io.github.nutea.anylisten.core.data.gateway.ProtocolDtos
+import io.github.nutea.anylisten.core.model.AddMusicLocationType
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -46,6 +47,46 @@ class ProtocolDtosTest {
             ),
         )
         assertEquals(ProtocolConstants.LIST_LOVE, lists.single().id)
+    }
+
+    @Test
+    fun stampsCreateTimeAndReadsAddLocationType() {
+        val track = ProtocolDtos.trackFrom(
+            "profile",
+            "love",
+            JsonObject(
+                mapOf(
+                    "id" to JsonPrimitive("t1"),
+                    "name" to JsonPrimitive("Song"),
+                    "singer" to JsonPrimitive("Artist"),
+                    "meta" to JsonObject(mapOf("musicId" to JsonPrimitive("fp-1"))),
+                ),
+            ),
+        )
+        val stamped = ProtocolDtos.withCreateTime(ProtocolDtos.trackToProtocol(track), 1_700_000_000_000L)
+        assertEquals(1_700_000_000_000L, stamped["meta"]?.let { (it as JsonObject)["createTime"] }?.let {
+            (it as JsonPrimitive).content.toLong()
+        })
+        assertEquals(
+            AddMusicLocationType.BOTTOM,
+            ProtocolDtos.addMusicLocationTypeFrom(
+                JsonObject(mapOf("list.addMusicLocationType" to JsonPrimitive("bottom"))),
+            ),
+        )
+        assertEquals(
+            AddMusicLocationType.BOTTOM,
+            ProtocolDtos.addMusicLocationTypeFrom(
+                JsonObject(
+                    mapOf(
+                        "list" to JsonObject(mapOf("addMusicLocationType" to JsonPrimitive("bottom"))),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            AddMusicLocationType.TOP,
+            ProtocolDtos.addMusicLocationTypeFrom(JsonObject(emptyMap())),
+        )
     }
 
     @Test

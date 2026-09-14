@@ -1,5 +1,6 @@
 package io.github.nutea.anylisten.core.data.gateway
 
+import io.github.nutea.anylisten.core.model.AddMusicLocationType
 import io.github.nutea.anylisten.core.model.IntervalParser
 import io.github.nutea.anylisten.core.model.Playlist
 import io.github.nutea.anylisten.core.model.ProtocolConstants
@@ -40,6 +41,23 @@ object ProtocolDtos {
             sizeLabel = meta?.string("sizeStr"),
             extension = meta?.string("ext"),
         )
+    }
+
+    fun withCreateTime(musicInfo: JsonObject, createdAtEpochMs: Long): JsonObject {
+        val meta = musicInfo["meta"]?.jsonObject?.toMutableMap() ?: mutableMapOf()
+        meta["createTime"] = JsonPrimitive(createdAtEpochMs)
+        return JsonObject(
+            musicInfo.toMutableMap().apply {
+                put("meta", JsonObject(meta))
+            },
+        )
+    }
+
+    fun addMusicLocationTypeFrom(settings: JsonObject?): AddMusicLocationType {
+        if (settings == null) return AddMusicLocationType.TOP
+        val dotted = settings.string("list.addMusicLocationType")
+        val nested = (settings["list"] as? JsonObject)?.string("addMusicLocationType")
+        return AddMusicLocationType.fromWire(dotted ?: nested)
     }
 
     fun trackToProtocol(track: Track): JsonObject {

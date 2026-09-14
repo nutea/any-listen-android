@@ -19,6 +19,7 @@ import io.github.nutea.anylisten.core.data.gateway.IpcAuthClient
 import io.github.nutea.anylisten.core.data.gateway.ProtocolAnyListenGateway
 import io.github.nutea.anylisten.core.data.local.AppDatabase
 import io.github.nutea.anylisten.core.data.repo.LibraryRepository
+import io.github.nutea.anylisten.core.data.repo.RecentlyPlayedRecorder
 import io.github.nutea.anylisten.core.data.repo.SessionRepository
 import io.github.nutea.anylisten.core.data.session.AppSettingsStore
 import io.github.nutea.anylisten.core.data.session.SecureSessionStore
@@ -54,6 +55,7 @@ class AppContainer(context: Context) {
     val offlineAssets = OfflineAssets(appContext.filesDir.resolve("offline"), gateway,
         FileDownloader(clients.api), artwork, { sessionStore.current()?.profile?.baseUrl.orEmpty() })
     val library = LibraryRepository(db.libraryDao(), gateway)
+    val recentlyPlayed = RecentlyPlayedRecorder(library)
     val session = SessionRepository(connection)
     val downloadsDir = appContext.filesDir.resolve("downloads").apply { mkdirs() }
     val cacheDir = appContext.cacheDir.resolve("media").apply { mkdirs() }
