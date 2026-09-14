@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -28,6 +29,39 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class Message2CallTest {
+    @Test fun successfulVoidReplyIsNotATimeout() = runBlocking {
+        val sent = CompletableDeferred<String>()
+        val client = Message2Call(ProtocolDtos.json) { sent.complete(it) }
+        val job = async { client.call(listOf("inited")) }
+        val request = ProtocolDtos.json.parseToJsonElement(sent.await()) as JsonArray
+        client.dispatch("[1," + request[1] + ",null]")
+        assertNull(job.await())
+    }
+
+    @Test fun serverListPushIsAcknowledgedAndInvalidatesLibrary() {
+        val replies = mutableListOf<String>()
+        val client = Message2Call(ProtocolDtos.json) { replies.add(it) }
+        client.dispatch("""[0,"push1",["listAction"],[{"action":"list_music_add","data":{"id":"love"}}],[]]""")
+        assertEquals(1L, client.libraryChanges.value)
+        assertEquals("[1,\"push1\",null,null]", replies.single())
+        client.dispatch("""[0,"push2",["listAction"],[{"action":"list_remove","data":["custom"]}],[]]""")
+        assertEquals(2L, client.libraryChanges.value)
+        client.failAll()
+        client.dispatch("""[0,"late",["listAction"],[{"action":"list_create"}],[]]""")
+        assertEquals(2L, client.libraryChanges.value)
+    }
+
+    @Test fun unrelatedAndMalformedPushesDoNotRefreshLibrary() {
+        val replies = mutableListOf<String>()
+        val client = Message2Call(ProtocolDtos.json) { replies.add(it) }
+        client.dispatch("""[0,"other",["playerAction"],[{}],[]]""")
+        client.dispatch("""[0,"invalid",["listAction"],[null],[]]""")
+        client.dispatch("""[0,"broken"]""")
+        assertEquals(0L, client.libraryChanges.value)
+        assertEquals(2, replies.size)
+        assertTrue(replies.all { it.contains("Unsupported client call") })
+    }
+
     @Test
     fun requestAndResponse() = runBlocking {
         val sent = CompletableDeferred<String>()

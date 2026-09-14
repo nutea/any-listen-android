@@ -7,7 +7,6 @@
     <string name="connect_action">Connect</string>
     <string name="connect_test">Test connection</string>
     <string name="library_title">Library</string>
-    <string name="library_refresh">Refresh</string>
     <string name="library_empty">No lists yet. Connect and refresh.</string>
     <string name="playlist_search">Search in current playlist</string>
     <string name="play_all">Play all</string>

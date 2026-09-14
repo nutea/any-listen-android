@@ -271,3 +271,14 @@ DownloadRecoveryTest 与 OfflineAssetsTest 共 9 项通过，设置页回归 1 �
 
 - 远程 Linux CI 首次因旧手写 gradlew 的 JVM 参数引号而失败；重新生成标准 Gradle 8.13 Wrapper，Git Bash / Windows 启动均验证通过。JAR 与发行包 SHA-256 依据 https://gradle.org/release-checksums/ 核对并固定。
 - 补充修复 CookieJar：匹配 Secure、路径及过期时间，同域新增 Cookie 不再清空其他 Cookie，避免同域 HTTP 封面请求携带仅限 HTTPS 的会话 Cookie。新增 2 项单元回归。
+
+
+## v0.1.3 发布前回归（2026-09-14）
+
+基线：已发布 v0.1.2。检查最近播放、流式缓存、缓冲指示、默认矢量封面及自动同步的累计变更。
+
+- 单元测试：core:model 34 项、core:data 150 项、core:playback 9 项通过，共 193 项。
+- 模拟器 API 36：StreamPlaybackTest、BufferingUiTest、LibraryNavigationTest 共 10 项通过；验证先播放再完整缓存、局部读取合并、加载状态、歌单更新和最近播放。
+- Debug / AndroidTest 构建、Release Lint、Release 压缩构建及 APK 签名校验通过；正式版本 0.1.3，versionCode 10。
+- 审查补修：有界读取 EOF 不再当作完整资源 EOF；已知长度不因提前 EOF 缩短；丢失半成品时废弃旧区间；清缓存后旧 sink 的迟到关闭不能删除新录制。
+- 发布采用标签 CI 签名，公开附件另行下载核对校验值及与 v0.1.2 的签名一致性。本轮未执行真机完整联调。

@@ -37,14 +37,14 @@ class LibraryBackStackTest {
                 LibraryNavHost(nav, Modifier.weight(1f), motion = motion) {
                     libraryPage("library") { entry ->
                         LibraryOverviewContent(LibraryUiState(snapshot = snapshot), { null },
-                            { playlist -> if (nav.acceptsInput(entry)) nav.navigate("playlist/${playlist.id}") }, {}, {})
+                            { playlist -> if (nav.acceptsInput(entry)) nav.navigate("playlist/${playlist.id}") }, {})
                     }
                     libraryPage("playlist/{id}") { entry ->
                         val id = entry.arguments!!.getString("id")!!
                         val playlist = lists.first { it.id == id }
                         SideEffect { stale = entry }
                         LibraryContent(LibraryUiState(snapshot = snapshot, selected = playlist, filtered = songs[id]!!),
-                            null, { null }, { false }, {}, {}, {}, {}, {},
+                            null, { null }, { false }, {}, {}, {}, {},
                             onBack = { if (nav.acceptsInput(entry)) nav.popBackStack() }) { _, _ ->
                             if (nav.acceptsInput(entry)) songActions++
                         }

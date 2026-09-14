@@ -16,11 +16,13 @@ class StreamingCacheDataSource(
     private var openedAt = 0L
     private var openedLength = C.LENGTH_UNSET.toLong()
     private var eof = false
+    private var bounded = false
 
     override fun open(dataSpec: DataSpec): Long {
         closeSink(endOfInput = false)
         eof = false
         val length = source.open(dataSpec)
+        bounded = dataSpec.length != C.LENGTH_UNSET.toLong()
         openedAt = dataSpec.position
         openedLength = length
         writeAt = dataSpec.position
@@ -28,7 +30,9 @@ class StreamingCacheDataSource(
             ?.value?.joinToString().orEmpty().lowercase()
         if (!contentType.contains("text/html") && !contentType.contains("application/json") &&
             enabled() && dataSpec.uri.scheme in listOf("http", "https")) {
-            sink = runCatching { openSink(dataSpec, length) }.getOrNull()
+            // DataSpec.length bounds a read, not the resource. Its EOF cannot establish file size.
+            val resourceLength = if (bounded) C.LENGTH_UNSET.toLong() else length
+            sink = runCatching { openSink(dataSpec, resourceLength) }.getOrNull()
         }
         return length
     }
@@ -55,7 +59,7 @@ class StreamingCacheDataSource(
             drainTail()
             source.close()
         } finally {
-            closeSink(endOfInput = eof)
+            closeSink(endOfInput = eof && !bounded)
             eof = false
             writeAt = 0L
             openedLength = C.LENGTH_UNSET.toLong()
@@ -75,8 +79,10 @@ class StreamingCacheDataSource(
         if (unread <= 0L || unread > MAX_DRAIN_BYTES) return
         if (readThisOpen * 10 < openedLength * 9) return
         val buffer = ByteArray(8192)
-        while (true) {
-            val count = try { source.read(buffer, 0, buffer.size) } catch (_: Exception) { break }
+        while (writeAt - openedAt <= openedLength) {
+            val remaining = openedLength - (writeAt - openedAt)
+            val readSize = if (remaining == 0L) 1 else minOf(buffer.size.toLong(), remaining).toInt()
+            val count = try { source.read(buffer, 0, readSize) } catch (_: Exception) { break }
             if (count == C.RESULT_END_OF_INPUT) { eof = true; break }
             if (count <= 0) break
             val position = writeAt

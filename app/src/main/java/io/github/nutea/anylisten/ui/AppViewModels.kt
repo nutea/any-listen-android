@@ -81,7 +81,6 @@ data class ConnectUiState(
 
 data class LibraryUiState(
     val snapshot: LibrarySnapshot = LibrarySnapshot(emptyList(), emptyMap(), 0L, offline = false),
-    val refreshing: Boolean = false,
     val error: String? = null,
     val query: String = "",
     val selected: Playlist? = null,
@@ -294,15 +293,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }.onFailure { error ->
                     _connect.update { it.copy(busy = false, error = message(error)) }
                 }
-        }
-    }
-
-    fun refresh() {
-        safeLaunch {
-            _library.update { it.copy(refreshing = true, error = null) }
-            runCatching { container.library.refresh(); safeLaunch { container.refreshCachedResources(); refreshStorage() }; refreshStorage() }
-                .onFailure { error -> _library.update { it.copy(error = message(error)) } }
-            _library.update { it.copy(refreshing = false) }
         }
     }
 

@@ -12,6 +12,29 @@ import java.io.File
 class StreamCacheAssemblerTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun prematureEofDoesNotShrinkKnownResourceLength() {
+        val files = files()
+        val assembler = StreamCacheAssembler(files.part, files.meta, files.complete)
+        assembler.opened(0, 1000)
+        assembler.write(0, ByteArray(500), 0, 500)
+        assertFalse(assembler.finish(endOfInput = true))
+        assertFalse(files.complete.exists())
+    }
+
+    @Test fun missingPartialFileInvalidatesPersistedRanges() {
+        val files = files()
+        val first = StreamCacheAssembler(files.part, files.meta, files.complete)
+        first.opened(0, 1000)
+        first.write(0, ByteArray(500), 0, 500)
+        first.finish(false)
+        files.part.delete()
+        val resumed = StreamCacheAssembler(files.part, files.meta, files.complete)
+        resumed.opened(500, 500)
+        resumed.write(500, ByteArray(500), 0, 500)
+        assertFalse(resumed.finish(true))
+        assertFalse(files.complete.exists())
+    }
+
     @Test fun sequentialOpenToEofBecomesCompleteFile() {
         val body = "complete-audio-bytes".toByteArray()
         val files = files()

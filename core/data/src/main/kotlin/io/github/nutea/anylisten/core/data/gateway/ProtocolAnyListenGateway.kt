@@ -43,19 +43,35 @@ class ProtocolAnyListenGateway(
         get() = connection.session.value?.profile?.baseUrl
             ?: throw AppError(ErrorKind.SESSION_EXPIRED, "Not signed in")
 
-    override suspend fun refreshLibrary(): LibrarySnapshot {
+    override suspend fun refreshLibrary(): LibrarySnapshot = readLibrary(null, null)
+
+    override suspend fun refreshLibrary(cached: LibrarySnapshot, changedPlaylistIds: Set<String>): LibrarySnapshot =
+        readLibrary(cached, changedPlaylistIds)
+
+    private suspend fun readLibrary(cached: LibrarySnapshot?, changedPlaylistIds: Set<String>?): LibrarySnapshot {
         val profileId = connection.session.value?.profile?.id
             ?: throw AppError(ErrorKind.SESSION_EXPIRED, "Not signed in")
         val listsEl = connection.withChannel { it.call(listOf("getAllUserLists")) }
         val playlists = ProtocolDtos.playlistsFrom(listsEl?.jsonObject ?: JsonObject(emptyMap()))
         val tracks = linkedMapOf<String, List<Track>>()
+        val freshlyRead = mutableMapOf<String, Track>()
         for (playlist in playlists) {
+            val retained = cached?.tracksByPlaylist?.get(playlist.id)
+            if (changedPlaylistIds != null && playlist.id !in changedPlaylistIds && retained != null &&
+                retained.all { it.identity.serverProfileId == profileId }) {
+                tracks[playlist.id] = retained
+                continue
+            }
             val musics = connection.withChannel { it.call(listOf("getListMusics"), listOf(JsonPrimitive(playlist.id))) }
             tracks[playlist.id] = musics?.jsonArray?.map {
                 val track = ProtocolDtos.trackFrom(profileId, playlist.id, it.jsonObject)
                 track.copy(coverUrl = resolvePublicUrl(track.coverUrl) ?: track.coverUrl)
             }.orEmpty()
+            tracks.getValue(playlist.id).forEach { freshlyRead[it.cacheKey] = it }
         }
+        // A track may occur in several lists but shares one local database row. Do not let
+        // retained metadata from another playlist overwrite a freshly read update.
+        tracks.replaceAll { _, items -> items.map { freshlyRead[it.cacheKey] ?: it } }
         return LibrarySnapshot(
             playlists = playlists.map { item -> item.copy(trackCount = tracks[item.id]?.size ?: item.trackCount) },
             tracksByPlaylist = tracks,

@@ -43,7 +43,7 @@ fun PlaylistScreen(vm: AppViewModel, onBack: () -> Unit, onSearch: () -> Unit, o
     val player by vm.player.collectAsState()
     val downloadedKeys = downloadedTrackKeys(vm)
     LibraryContent(state, player.track?.cacheKey, vm::artworkUrl, vm::isFavorite, vm::selectPlaylist,
-        vm::updateQuery, vm::refresh, { if (canInteract()) vm.play(state.filtered, sourceListId = state.selected?.id) }, { if (canInteract()) vm.requestDownload(state.filtered.filterNot { it.cacheKey in downloadedKeys }) },
+        vm::updateQuery, { if (canInteract()) vm.play(state.filtered, sourceListId = state.selected?.id) }, { if (canInteract()) vm.requestDownload(state.filtered.filterNot { it.cacheKey in downloadedKeys }) },
         vm::isAvailableOffline, vm::setSort,
         onBack = onBack, onSearch = onSearch, isPlaying = player.isPlaying, downloaded = { it.cacheKey in downloadedKeys },
         onBatch = { tracks, action ->
@@ -89,7 +89,7 @@ fun LibraryDialogs(vm: AppViewModel) {
 @Composable
 fun LibraryContent(
     state: LibraryUiState, currentKey: String?, artwork: (Track?) -> String?, favorite: (Track) -> Boolean,
-    onSelect: (Playlist) -> Unit, onQuery: (String) -> Unit, onRefresh: () -> Unit,
+    onSelect: (Playlist) -> Unit, onQuery: (String) -> Unit,
     onPlayAll: () -> Unit, onDownloadAll: () -> Unit,
     offlineReady: (Track) -> Boolean = { false },
     onSort: (TrackSortField) -> Unit = {},
@@ -135,11 +135,7 @@ fun LibraryContent(
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Default.Search, stringResource(R.string.show_search))
                     }
-                    IconButton(onClick = onRefresh, enabled = !state.refreshing) {
-                        Icon(Icons.Default.Refresh, stringResource(R.string.library_refresh))
-                    }
                 }
-                if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp))
                 if (state.snapshot.offline) Box(Modifier.padding(top = 8.dp, end = 8.dp)) { Notice(stringResource(R.string.offline_banner)) }
                 state.error?.let { Box(Modifier.padding(top = 8.dp, end = 8.dp)) { Notice(it, error = true) } }
             }

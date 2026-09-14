@@ -425,6 +425,21 @@ class OfflineAssetsTest {
         assertTrue(LocalInventory.cached(assets.catalog(), assets::inspect, emptySet()).isEmpty())
     }
 
+    @Test fun lateCloseFromClearedStreamDoesNotDeleteNewRecording() = runBlocking {
+        val http = OkHttpClient()
+        val assets = OfflineAssets(temp.newFolder(), MockAnyListenGateway(), FileDownloader(http), ArtworkStore(temp.newFolder(), http)) { "https://example.test" }
+        val body = "new complete audio".toByteArray()
+        val old = assets.openStreamSink(track, "https://example.test/audio", 0, body.size.toLong())!!
+        old.write(0, body, 0, 3)
+        assets.clearAudio()
+        val fresh = assets.openStreamSink(track, "https://example.test/audio", 0, body.size.toLong())!!
+        fresh.write(0, body, 0, 4)
+        old.close(false)
+        fresh.write(4, body, 4, body.size - 4)
+        fresh.close(true)
+        assertArrayEquals(body, assets.audioFile(track.cacheKey)!!.readBytes())
+    }
+
     @Test fun staleStreamTokenDoesNotPublishAfterCacheClear() = runBlocking {
         val dir = temp.newFolder()
         val http = OkHttpClient()

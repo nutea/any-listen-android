@@ -66,7 +66,6 @@ internal class StreamCacheAssembler(
         val writtenEnd = maxOf(lastEnd, spans.maxOfOrNull { it.end } ?: 0L)
         if (endOfInput) {
             if (expected < 0) expected = writtenEnd
-            else if (writtenEnd in 1 until expected) expected = writtenEnd
         }
         persistMeta()
         val size = expected
@@ -142,6 +141,7 @@ internal class StreamCacheAssembler(
             }
         }
         spans = merge(spans).toMutableList()
+        if (!part.isFile || spans.any { it.start < 0 || it.end > part.length() }) reset()
     }
 
     private data class Span(val start: Long, val end: Long)

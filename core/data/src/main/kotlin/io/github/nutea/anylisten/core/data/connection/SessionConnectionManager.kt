@@ -18,6 +18,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -95,6 +96,12 @@ class SessionConnectionManager(
     private val live = AtomicReference<IpcChannel?>(null)
     private val pendingLogin = AtomicReference<Credentials?>(null)
     private val lastError = AtomicReference<AppError?>(null)
+
+    private val dirtyLibrary = io.github.nutea.anylisten.core.data.gateway.PendingLibraryChanges()
+    fun takeLibraryChange() = dirtyLibrary.take()
+    private val _libraryChanges = MutableStateFlow(0L)
+    val libraryChanges = _libraryChanges.asStateFlow()
+    private var libraryWatch: Job? = null
 
     private var model = ConnectionModel()
     private var sequence = 0L
@@ -304,6 +311,15 @@ class SessionConnectionManager(
                 _session.value = envelope.session ?: arrived.session
                 lastError.set(null)
                 watchClose(arrived)
+                libraryWatch?.cancel()
+                libraryWatch = scope.launch {
+                    arrived.calls.libraryChanges.collect { revision ->
+                        if (revision > 0 && live.get() === arrived) {
+                            arrived.calls.takeLibraryChange()?.let { dirtyLibrary.add(it) }
+                            _libraryChanges.update { it + 1 }
+                        }
+                    }
+                }
                 val ready = _session.value ?: arrived.session
                 scope.launch { runCatching { onConnected(ready) } }
             } else {
@@ -313,6 +329,7 @@ class SessionConnectionManager(
         val held = live.get() ?: return
         if (state !is ConnectionState.Online || state.generation != held.generation) {
             live.set(null)
+            libraryWatch?.cancel()
             held.close(IpcChannel.NORMAL_CLOSE, "replaced")
         }
     }
@@ -394,9 +411,12 @@ class SessionConnectionManager(
         }
     }
 
-    /** Post-connect handshake. Its results refine the session but never fail the connection. */
+    /** Push registration is required; optional version metadata must not block a healthy session. */
     private suspend fun handshake(channel: IpcChannel, session: SessionInfo): SessionInfo {
-        ignoreTimeout { channel.calls.call(listOf("inited")) }
+        withTimeoutOrNull(HANDSHAKE_MS) {
+            channel.calls.call(listOf("inited"))
+            true
+        } ?: throw IpcTimeoutException("Push initialization timed out")
         val reported = ignoreTimeout { channel.calls.call(listOf("getCurrentVersionInfo")) }
         val version = ((reported as? JsonObject)?.get("version") as? JsonPrimitive)?.content
         runCatching { authenticator.primeStreamToken(session) }

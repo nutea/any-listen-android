@@ -77,7 +77,14 @@ class AppContainer(context: Context) {
     /** Observable session state for UI and playback; the single source of connection truth. */
     val connectionState get() = connection.state
 
+    private val librarySync = io.github.nutea.anylisten.core.data.repo.LibraryAutoSync(
+        scope, { gateway.isOnline() }, { android.os.SystemClock.elapsedRealtime() },
+    ) { ids -> library.refresh(ids) }
+    private var started = false
+
     fun start() {
+        if (started) return
+        started = true
         connection.start()
         // Every newly established socket gets one library refresh, and only one: keying on the
         // generation keeps a link flap from re-fetching the whole library.
@@ -86,9 +93,18 @@ class AppContainer(context: Context) {
                 .map { (it as? ConnectionState.Online)?.generation ?: 0L }
                 .distinctUntilChanged()
                 .filter { it != 0L }
-                .collect { runCatching { library.refresh() } }
+                .collect { librarySync.request() }
+        }
+        scope.launch {
+            connection.libraryChanges.collect { if (it > 0) connection.takeLibraryChange()?.let(librarySync::request) }
         }
         if (sessionStore.current() != null) connection.requestConnect()
+    }
+
+    fun onForeground() {
+        if (sessionStore.current() == null) return
+        connection.requestConnect()
+        librarySync.onForeground()
     }
 
     fun isConnected(): Boolean = connection.state.value is ConnectionState.Online

@@ -26,7 +26,7 @@ class LibraryRepository(
     private val dao: LibraryDao,
     private val gateway: AnyListenGateway,
 ) {
-    private val refreshFlight = SingleFlight<LibrarySnapshot>()
+    private val refreshMutex = Mutex()
     private val addMusicLocationType = MutableStateFlow(AddMusicLocationType.TOP)
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -38,9 +38,11 @@ class LibraryRepository(
 
     suspend fun cached(): LibrarySnapshot = snapshotFrom(dao.playlists(), gateway.isOnline())
 
-    suspend fun refresh(): LibrarySnapshot = refreshFlight.join {
-        val remote = gateway.refreshLibrary()
-        persist(remote)
+    suspend fun refresh(changedPlaylistIds: Set<String>? = null): LibrarySnapshot = refreshMutex.withLock {
+        val previous = cached()
+        val remote = if (changedPlaylistIds == null) gateway.refreshLibrary()
+            else gateway.refreshLibrary(previous, changedPlaylistIds)
+        if (!sameLibraryContents(previous, remote)) persist(remote)
         remote
     }
 
@@ -72,11 +74,13 @@ class LibraryRepository(
      * No-ops offline, when the queue was started from recently played, or when the id is already newest.
      */
     suspend fun recordPlay(track: Track, sourceListId: String?) {
-        if (!gateway.isOnline()) return
-        if (RecentlyPlayed.skipBecauseSourceIsRecent(sourceListId)) return
-        val updated = gateway.recordRecentlyPlayed(track, sourceListId) ?: return
-        addMusicLocationType.value = gateway.addMusicLocationType()
-        persistLastPlayed(updated)
+        refreshMutex.withLock {
+            if (!gateway.isOnline()) return
+            if (RecentlyPlayed.skipBecauseSourceIsRecent(sourceListId)) return
+            val updated = gateway.recordRecentlyPlayed(track, sourceListId) ?: return
+            addMusicLocationType.value = gateway.addMusicLocationType()
+            persistLastPlayed(updated)
+        }
     }
 
     suspend fun playlists(): List<Playlist> = dao.playlists().map { it.toModel() }
@@ -159,4 +163,13 @@ class RecentlyPlayedRecorder(private val library: LibraryRepository) {
             }
         }
     }
+}
+
+/** Compare persisted content, excluding timestamps and fields the local schema does not retain. */
+internal fun sameLibraryContents(a: LibrarySnapshot, b: LibrarySnapshot): Boolean {
+    fun playlists(snapshot: LibrarySnapshot) = snapshot.playlists.map { PlaylistEntity.from(it, 0L) }
+    fun tracks(snapshot: LibrarySnapshot) = snapshot.tracksByPlaylist.mapValues { (_, tracks) ->
+        tracks.map { TrackEntity.from(it).copy(playlistId = null) }
+    }
+    return a.addMusicLocationType == b.addMusicLocationType && playlists(a) == playlists(b) && tracks(a) == tracks(b)
 }

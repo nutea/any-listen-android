@@ -35,7 +35,7 @@ class LibraryNavigationTest {
     @Test fun overviewShowsThreeHorizontalEntriesAndCustomPlaylistRows() {
         var opened: String? = null
         var search = false
-        show { LibraryOverviewContent(LibraryUiState(snapshot = snapshot), { null }, { opened = it.id }, { search = true }, {}) }
+        show { LibraryOverviewContent(LibraryUiState(snapshot = snapshot), { null }, { opened = it.id }, { search = true }) }
         val bounds = listOf("love", "last_played", "default").map { compose.onNodeWithTag("playlist_$it").fetchSemanticsNode().boundsInRoot }
         assertEquals(bounds[0].top, bounds[1].top)
         assertEquals(bounds[1].top, bounds[2].top)
@@ -46,6 +46,22 @@ class LibraryNavigationTest {
         screenshot("library-overview")
         compose.onNodeWithContentDescription(context.getString(R.string.show_search)).performClick()
         compose.runOnIdle { assertTrue(search) }
+    }
+    @Test fun incomingSnapshotUpdatesOpenPlaylistWithoutRefreshControls() {
+        val state = androidx.compose.runtime.mutableStateOf(LibraryUiState(
+            snapshot = snapshot, selected = lists[3], filtered = listOf(first)))
+        show { LibraryContent(state.value, null, { null }, { false }, {}, {}, {}, {}) { _, _ -> } }
+        compose.onNodeWithText(first.title).assertIsDisplayed()
+        compose.onNodeWithText(other.title).assertDoesNotExist()
+        compose.onNodeWithContentDescription("刷新").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Refresh").assertDoesNotExist()
+        compose.runOnIdle {
+            state.value = state.value.copy(selected = lists[3].copy(name = "Updated playlist"), filtered = listOf(other))
+        }
+        compose.onAllNodesWithText("Updated playlist").onFirst().assertIsDisplayed()
+        compose.onNodeWithText(first.title).assertDoesNotExist()
+        compose.onNodeWithText(other.title).assertIsDisplayed()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
     }
     @Test fun searchFindsAcrossPlaylistsDeduplicatesAndPlaysResults() {
         var queue = emptyList<Track>()
@@ -74,8 +90,9 @@ class LibraryNavigationTest {
             sort = TrackSortField.PLAY_TIME,
             sortAscending = false,
         )
+        val state = androidx.compose.runtime.mutableStateOf(filled)
         var played: Track? = null
-        show { LibraryContent(filled, null, { null }, { false }, {}, {}, {}, {}, {}) { track, action -> if (action == TrackAction.PLAY) played = track } }
+        show { LibraryContent(state.value, null, { null }, { false }, {}, {}, {}, {}) { track, action -> if (action == TrackAction.PLAY) played = track } }
         val newerTop = compose.onNodeWithTag("song_${newer.cacheKey}").fetchSemanticsNode().boundsInRoot.top
         val olderTop = compose.onNodeWithTag("song_${older.cacheKey}").fetchSemanticsNode().boundsInRoot.top
         assertTrue(newerTop < olderTop)
@@ -85,7 +102,7 @@ class LibraryNavigationTest {
             snapshot = filled.snapshot.copy(tracksByPlaylist = mapOf("last_played" to emptyList()), playlists = listOf(playlist.copy(trackCount = 0))),
             filtered = emptyList(),
         )
-        show { LibraryContent(empty, null, { null }, { false }, {}, {}, {}, {}, {}) { _, _ -> } }
+        compose.runOnIdle { state.value = empty }
         compose.onAllNodesWithText(context.getString(R.string.list_last_played)).onFirst().assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.last_played_empty_detail)).assertIsDisplayed()
         screenshot("last-played-empty")

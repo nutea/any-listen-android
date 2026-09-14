@@ -106,11 +106,9 @@ class OfflineAssets(
 
                 override fun close(endOfInput: Boolean) {
                     synchronized(gate) {
-                        if (token != streamEpoch.get()) {
-                            assembler.discard()
-                            streamAssemblers.remove(track.cacheKey, assembler)
-                            return
-                        }
+                        // Cache clearing already invalidated the old recording. A late close
+                        // must not delete paths now owned by a new recording of the same song.
+                        if (token != streamEpoch.get()) return
                         if (audioFile(track.cacheKey) != null) {
                             assembler.discard()
                             streamAssemblers.remove(track.cacheKey, assembler)

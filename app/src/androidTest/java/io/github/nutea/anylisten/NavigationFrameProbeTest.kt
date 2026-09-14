@@ -36,9 +36,9 @@ class NavigationFrameProbeTest {
                     nav = rememberNavController()
                     SideEffect { ready.countDown() }
                     LibraryNavHost(nav,Modifier.fillMaxSize(),motion = true) {
-                        libraryPage("library") { LibraryOverviewContent(LibraryUiState(snapshot = snapshot),{null},{},{},{}) }
+                        libraryPage("library") { LibraryOverviewContent(LibraryUiState(snapshot = snapshot),{null},{},{}) }
                         libraryPage("playlist/a") {
-                            LibraryContent(LibraryUiState(snapshot = snapshot,selected=list,filtered=songs),null,{null},{false},{},{},{},{},{},onBack={nav.popBackStack()}) { _,_-> }
+                            LibraryContent(LibraryUiState(snapshot = snapshot,selected=list,filtered=songs),null,{null},{false},{},{},{},{},onBack={nav.popBackStack()}) { _,_-> }
                         }
                     }
                 } }

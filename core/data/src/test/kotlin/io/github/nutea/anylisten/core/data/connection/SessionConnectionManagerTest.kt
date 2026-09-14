@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -57,6 +58,79 @@ class SessionConnectionManagerTest {
     fun tearDown() {
         scope.cancel()
         executor.shutdownNow()
+    }
+
+    @Test
+    fun rejectedPushInitializationRebuildsConnectionBeforePublishingOnline() = runBlocking {
+        val world = World()
+        world.store.save(profile(), "token", "secret")
+        world.network.emit(NetworkSnapshot(id = 1L, online = true))
+        world.channels.failInitializationOnce = true
+        val manager = world.manager()
+        manager.requestConnect()
+        withTimeout(WAIT) { manager.state.first { it is ConnectionState.Online } }
+        assertEquals(2, world.channels.opened)
+        assertTrue(manager.isOnline)
+    }
+
+    @Test
+    fun partialLibraryRefreshReadsOnlyChangedAndNewPlaylists() = runBlocking {
+        val world = World()
+        world.store.save(profile(), "token", "secret")
+        world.network.emit(NetworkSnapshot(id = 1L, online = true))
+        val requested = CopyOnWriteArrayList<String>()
+        world.channels.responder = { path, args ->
+            when (path) {
+                "getAllUserLists" -> ProtocolDtos.json.parseToJsonElement("""{"userList":[{"id":"a","name":"Renamed"},{"id":"b","name":"B"},{"id":"new","name":"New"}]}""")
+                "getListMusics" -> {
+                    val id = args[0].jsonPrimitive.content
+                    requested.add(id)
+                    ProtocolDtos.json.parseToJsonElement("""[{"id":"$id-song","name":"Fresh $id","singer":"Artist","meta":{}}]""")
+                }
+                else -> null
+            }
+        }
+        val manager = world.manager()
+        withTimeout(WAIT) { manager.ensureConnected() }
+        val gateway = io.github.nutea.anylisten.core.data.gateway.ProtocolAnyListenGateway(manager)
+        val old = io.github.nutea.anylisten.core.model.Track(
+            io.github.nutea.anylisten.core.model.TrackIdentity("p", "kept"), "Kept", "Artist", "Album", null)
+        val cached = io.github.nutea.anylisten.core.model.LibrarySnapshot(
+            playlists = emptyList(), refreshedAtEpochMs = 1L, offline = false,
+            tracksByPlaylist = mapOf("a" to listOf(old), "b" to listOf(old), "removed" to listOf(old)))
+        val updated = gateway.refreshLibrary(cached, setOf("b"))
+        assertEquals(listOf("b", "new"), requested.toList())
+        assertSame(old, updated.tracksByPlaylist["a"]!!.single())
+        assertEquals("Fresh b", updated.tracksByPlaylist["b"]!!.single().title)
+        assertEquals("Renamed", updated.playlists.first().name)
+        assertFalse(updated.tracksByPlaylist.containsKey("removed"))
+        requested.clear()
+        gateway.refreshLibrary()
+        assertEquals(listOf("a", "b", "new"), requested.toList())
+    }
+
+    @Test
+    fun libraryPushObservationMovesToTheNewSocketAfterReconnect() = runBlocking {
+        val world = World()
+        world.store.save(profile(), "token", "secret")
+        world.network.emit(NetworkSnapshot(id = 1L, online = true))
+        val manager = world.manager()
+        withTimeout(WAIT) { manager.ensureConnected() }
+        val first = world.channels.last()!!
+        val push = """[0,"server-list",["listAction"],[{"action":"list_music_add","data":{"id":"love"}}],[]]"""
+        first.calls.dispatch(push)
+        withTimeout(WAIT) { manager.libraryChanges.first { it > 0 } }
+        val beforeReconnect = manager.libraryChanges.value
+        world.network.emit(NetworkSnapshot(id = 2L, online = true))
+        world.awaitLink(manager, 2L)
+        val second = world.channels.last()!!
+        assertTrue(first.calls.isClosed)
+        first.calls.dispatch(push)
+        world.settle(manager)
+        assertEquals(beforeReconnect, manager.libraryChanges.value)
+        second.calls.dispatch(push)
+        withTimeout(WAIT) { manager.libraryChanges.first { it > beforeReconnect } }
+        assertTrue(manager.libraryChanges.value > beforeReconnect)
     }
 
     @Test
@@ -388,6 +462,8 @@ class SessionConnectionManagerTest {
 
     private class FakeChannelFactory : IpcChannelFactory {
         private val history = CopyOnWriteArrayList<FakeChannel>()
+        var failInitializationOnce = false
+        var responder: ((String, JsonArray) -> JsonElement?)? = null
 
         val opened: Int get() = history.size
 
@@ -397,7 +473,7 @@ class SessionConnectionManagerTest {
         fun last(): FakeChannel? = history.lastOrNull()
 
         override suspend fun open(session: SessionInfo, generation: Long): IpcChannel =
-            FakeChannel(generation, session).also { history.add(it) }
+            FakeChannel(generation, session, failInitializationOnce && history.isEmpty(), responder).also { history.add(it) }
     }
 
     /**
@@ -407,6 +483,8 @@ class SessionConnectionManagerTest {
     private class FakeChannel(
         override val generation: Long,
         override val session: SessionInfo,
+        private val failInitialization: Boolean = false,
+        private val responder: ((String, JsonArray) -> JsonElement?)? = null,
     ) : IpcChannel {
         override val closed = CompletableDeferred<ConnectionFault>()
         private val sent = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
@@ -416,15 +494,19 @@ class SessionConnectionManagerTest {
 
         override val calls: Message2Call = Message2Call(ProtocolDtos.json, callTimeoutMs = CALL_TIMEOUT_MS) { frame ->
             val parsed = ProtocolDtos.json.parseToJsonElement(frame) as JsonArray
+            if (parsed[0].jsonPrimitive.content != "0") return@Message2Call
             val name = parsed[1].jsonPrimitive.content
             val path = (parsed[2] as JsonArray)[0].jsonPrimitive.content
             sent.getOrPut(path) { CompletableDeferred() }.complete(Unit)
             if (path == "getCurrentVersionInfo") probe.get().complete(Unit)
-            if (answerCalls) dispatchReply(name, path)
+            if (path == "inited" && failInitialization) {
+                calls.dispatch(JsonArray(listOf(JsonPrimitive(1), JsonPrimitive(name),
+                    buildJsonObject { put("message", JsonPrimitive("Initialization rejected")) })).toString())
+            } else if (answerCalls) dispatchReply(name, path, parsed[3] as JsonArray)
         }
 
-        private fun dispatchReply(name: String, path: String) {
-            val result = when (path) {
+        private fun dispatchReply(name: String, path: String, args: JsonArray) {
+            val result = responder?.invoke(path, args) ?: when (path) {
                 "getCurrentVersionInfo" -> buildJsonObject { }
                 "inited" -> JsonNull
                 else -> JsonPrimitive("url")

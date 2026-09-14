@@ -20,6 +20,22 @@ import java.io.IOException
 class StreamingCacheDataSourceTest {
     private val uri = android.net.Uri.parse("https://stream-fixture.invalid/audio.bin")
 
+    @Test fun boundedReadDoesNotAdvertiseWholeResourceLengthOrEof() {
+        val sink = RecordingSink()
+        var resourceLength = 0L
+        val source = StreamingCacheDataSource(ArraySource(ByteArray(1000)), { true }) { _, length ->
+            resourceLength = length
+            sink
+        }
+        source.open(DataSpec.Builder().setUri(uri).setLength(100).build())
+        val buffer = ByteArray(100)
+        while (source.read(buffer, 0, buffer.size) != C.RESULT_END_OF_INPUT) { }
+        source.close()
+        assertEquals(C.LENGTH_UNSET.toLong(), resourceLength)
+        assertFalse(sink.eof.single())
+        assertEquals(100, sink.bytes)
+    }
+
     @Test fun seekedReopenWritesAtFileOffsetsNotAsAFreshFile() {
         val body = ByteArray(12_000) { it.toByte() }
         val sink = RecordingSink()

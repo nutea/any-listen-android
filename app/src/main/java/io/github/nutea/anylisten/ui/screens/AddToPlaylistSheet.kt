@@ -48,7 +48,7 @@ fun AddToPlaylistSheet(playlists: List<Playlist>, selectedCount: Int,
                         .clickable { onSelect(playlist) }.padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Artwork(artwork(playlist), Modifier.size(56.dp).testTag("add_playlist_cover_${playlist.id}"), playlist.name, 12.dp)
+                        Artwork(artwork(playlist), Modifier.size(56.dp).testTag("add_playlist_cover_${playlist.id}"), playlist.name, 12.dp, playlist = true)
                         Column(Modifier.weight(1f)) {
                             Text(playlistName(playlist), style = MaterialTheme.typography.titleMedium,
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)

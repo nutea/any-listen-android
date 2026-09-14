@@ -18,6 +18,7 @@ data class SessionInfo(
  */
 interface AnyListenGateway {
     suspend fun refreshLibrary(): LibrarySnapshot
+    suspend fun refreshLibrary(cached: LibrarySnapshot, changedPlaylistIds: Set<String>): LibrarySnapshot = refreshLibrary()
     suspend fun resolveMedia(track: Track, refresh: Boolean = false): MediaResource
     suspend fun resolveCover(track: Track): String?
     suspend fun resolveLyrics(track: Track): Lyrics

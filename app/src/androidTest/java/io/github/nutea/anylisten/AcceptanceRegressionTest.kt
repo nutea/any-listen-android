@@ -31,7 +31,7 @@ class AcceptanceRegressionTest {
             var searching by remember { mutableStateOf(false) }
             AnyListenTheme { Surface(Modifier.fillMaxSize()) {
                 if (searching) LibrarySearchContent(state.snapshot, null, { null }, { false }, { false }, { searching = false }, { _, _ -> }) { _, _ -> }
-                else LibraryContent(state, null, { null }, { false }, {}, {}, {}, {}, {}, onSearch = { searching = true }) { _, _ -> }
+                else LibraryContent(state, null, { null }, { false }, {}, {}, {}, {}, onSearch = { searching = true }) { _, _ -> }
             } }
         }
         compose.onNodeWithContentDescription(context.getString(R.string.show_search)).performClick()

@@ -53,7 +53,7 @@ class MusicExperienceTest {
         var action: TrackAction? = null
         show {
             Column {
-                Box(Modifier.weight(1f)) { LibraryContent(library(), tracks[0].cacheKey, { null }, { true }, {}, {}, {}, {}, {}) { _, value -> action = value } }
+                Box(Modifier.weight(1f)) { LibraryContent(library(), tracks[0].cacheKey, { null }, { true }, {}, {}, {}, {}) { _, value -> action = value } }
                 MiniPlayerContent(player(), null, {}, {}, {})
             }
         }
@@ -77,7 +77,7 @@ class MusicExperienceTest {
 
     @Test fun offlineLibraryDisablesServerWrites() {
         var action: TrackAction? = null
-        show { LibraryContent(library(true), null, { null }, { false }, {}, {}, {}, {}, {}) { _, value -> action = value } }
+        show { LibraryContent(library(true), null, { null }, { false }, {}, {}, {}, {}) { _, value -> action = value } }
         compose.onNodeWithContentDescription(label(R.string.track_options, tracks[0].title)).performScrollTo().performClick()
         compose.onNodeWithText(label(R.string.cd_favorite)).assertIsNotEnabled()
         compose.onNodeWithText(label(R.string.play_later)).assertIsEnabled()
@@ -226,7 +226,7 @@ class MusicExperienceTest {
 
     @Test fun playingIndicatorAnimatesAndStopsWhenPaused() {
         val playing = mutableStateOf(true)
-        show { LibraryContent(library(), tracks[0].cacheKey, { null }, { true }, {}, {}, {}, {}, {},
+        show { LibraryContent(library(), tracks[0].cacheKey, { null }, { true }, {}, {}, {}, {},
             offlineReady = { true }, isPlaying = playing.value) { _, _ -> } }
         compose.onNodeWithContentDescription(label(R.string.cd_favorite)).assertDoesNotExist()
         compose.onNodeWithContentDescription(label(R.string.offline_ready)).assertDoesNotExist()
@@ -249,14 +249,14 @@ class MusicExperienceTest {
     }
 
     @Test fun libraryFirstScreenDoesNotKeepShortStatus() {
-        show { LibraryContent(library().copy(status = "Queued 2 download(s)"), null, { null }, { false }, {}, {}, {}, {}, {}) { _, _ -> } }
+        show { LibraryContent(library().copy(status = "Queued 2 download(s)"), null, { null }, { false }, {}, {}, {}, {}) { _, _ -> } }
         compose.onNodeWithText("Queued 2 download(s)").assertDoesNotExist()
     }
 
     @Test fun librarySortAndLongPressSelectionStayInCurrentPlaylist() {
         var later: Track? = null
         show {
-            LibraryContent(library(), tracks[0].cacheKey, { null }, { false }, {}, {}, {}, {}, {},
+            LibraryContent(library(), tracks[0].cacheKey, { null }, { false }, {}, {}, {}, {},
                 onBatch = { items, action -> if (action == TrackAction.PLAY_LATER) later = items.firstOrNull() }) { _, _ -> }
         }
         compose.onNodeWithContentDescription(label(R.string.sort_tracks)).performClick()

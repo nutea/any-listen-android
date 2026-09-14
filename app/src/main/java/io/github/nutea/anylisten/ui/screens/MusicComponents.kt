@@ -1,6 +1,8 @@
 package io.github.nutea.anylisten.ui.screens
 
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -43,14 +45,11 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 @Composable
-internal fun Artwork(url: String?, modifier: Modifier = Modifier, seed: String = "", radius: Dp = 8.dp) {
+internal fun Artwork(url: String?, modifier: Modifier = Modifier, seed: String = "", radius: Dp = 8.dp, playlist: Boolean = false) {
     val storedImage = rememberArtwork(url)
-    val palettes = listOf(0xFF3D54C4 to 0xFF9AA8E6, 0xFF8A6150 to 0xFFE4C79A, 0xFF35664B to 0xFFA7C9B4, 0xFF5C4A78 to 0xFFC9B8D8)
-    val colors = palettes[(seed.hashCode() and Int.MAX_VALUE) % palettes.size]
-    val glyph = seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "♪"
-    Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(radius))
-        .background(Color(colors.first)), contentAlignment = Alignment.Center) {
-        Text(glyph, color = Color.White.copy(alpha = .85f), fontSize = 16.sp)
+    Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(radius)), contentAlignment = Alignment.Center) {
+        Image(painterResource(if (playlist) R.drawable.cover_default_playlist else R.drawable.cover_default_track),
+            contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         if (storedImage != null) AsyncImage(model = storedImage, contentDescription = null,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }

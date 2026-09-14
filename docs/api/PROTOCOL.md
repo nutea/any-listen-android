@@ -167,3 +167,13 @@ https://<base>/api/p_url/<name>
 - 反代：当前实例 hello 在 `/api/ipc/hello`，无额外路径前缀。
 - 写并发与长期 ID（改文件路径）仍未测。
 - 不删除服务器原文件。
+
+## 服务端歌单变化推送
+
+服务端在 `inited` 后通过 `remoteQueueList.listAction` 发送 REQUEST，路径为 `["listAction"]`，第一个参数为 `{ action, data }`。客户端收到后立即以同一事件名返回成功 RESPONSE，避免阻塞服务端的后续队列推送。
+
+客户端将 `list_*` 通知视为音乐库失效信号，合并 250 ms 内的连续通知及受影响歌单 ID。每轮读取歌单元数据，只回读受影响或新增歌单的歌曲；未知事件、完整覆盖事件或无法解析的事件数据退回完整同步。同步期间的新通知保留到下一轮；失败以 1–30 秒退避重试，离线停止请求，重连后自动完整同步。旧连接关闭后不再接收其通知。该流程不强制刷新音频、封面或歌词缓存。
+
+依据：上游 `packages/web-server/src/app/renderer/winMain/rendererEvent/list.ts` 和 `packages/shared/types/types/list_ipc.d.ts`。
+
+推送初始化 `inited` 必须在 10 秒内成功应答，否则连接关闭并进入重连退避；无返回值的成功 RESPONSE 也算成功。回到前台时，距上次完整校对至少 60 秒才补查；持续连接期间每 5 分钟检查是否需要完整校对。离线不发起校对；局部同步不延后完整校对期限，避免长期漏通知。校对结果不变时不重写音乐库，避免无意义的 UI 更新。

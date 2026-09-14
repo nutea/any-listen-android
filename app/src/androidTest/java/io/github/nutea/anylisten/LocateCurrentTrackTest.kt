@@ -26,7 +26,7 @@ class LocateCurrentTrackTest {
         var actions = 0
         val current = tracks[20]
         compose.setContent { AnyListenTheme { Surface(Modifier.fillMaxSize()) {
-            LibraryContent(state, current.cacheKey, { null }, { false }, {}, {}, {}, {}, {}) { _, _ -> actions++ }
+            LibraryContent(state, current.cacheKey, { null }, { false }, {}, {}, {}, {}) { _, _ -> actions++ }
         } } }
         compose.onNodeWithTag("song_${current.cacheKey}").assertDoesNotExist()
         compose.onNodeWithContentDescription(context.getString(R.string.locate_current_track)).performClick()
@@ -40,7 +40,7 @@ class LocateCurrentTrackTest {
 
     @Test fun missingCurrentTrackDisablesLocate() {
         compose.setContent { AnyListenTheme {
-            LibraryContent(state, "another-playlist-song", { null }, { false }, {}, {}, {}, {}, {}) { _, _ -> }
+            LibraryContent(state, "another-playlist-song", { null }, { false }, {}, {}, {}, {}) { _, _ -> }
         } }
         compose.onNodeWithContentDescription(context.getString(R.string.locate_current_track)).assertIsNotEnabled()
     }

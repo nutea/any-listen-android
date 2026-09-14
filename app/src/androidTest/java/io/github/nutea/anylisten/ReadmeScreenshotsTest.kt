@@ -79,8 +79,8 @@ class ReadmeScreenshotsTest {
                     }, contentWindowInsets = WindowInsets(0,0,0,0)) { padding ->
                         Box(Modifier.padding(padding)) {
                             when(page.intValue) {
-                                0 -> LibraryOverviewContent(library,cover,{},{},{}, { covers[playlists.indexOf(it).coerceAtLeast(0) % 4] })
-                                1 -> LibraryContent(library,tracks[0].cacheKey,cover,{true},{},{},{},{},{},onBack = {},onAction = {_,_->})
+                                0 -> LibraryOverviewContent(library,cover,{},{}, { covers[playlists.indexOf(it).coerceAtLeast(0) % 4] })
+                                1 -> LibraryContent(library,tracks[0].cacheKey,cover,{true},{},{},{},{},onBack = {},onAction = {_,_->})
                                 2 -> PlayerContent(player,cover,true,false,actions,downloaded = true)
                                 3 -> DownloadsContent(assets,assets.take(3),emptyList(),StorageSummary(72*1024*1024L,24*1024*1024L,28_000_000_000L),
                                     artwork = { cover(it.track) },onPlay = {},onDeleteDownload = {},onDeleteCache = {},onRetry = {},onCancel = {})

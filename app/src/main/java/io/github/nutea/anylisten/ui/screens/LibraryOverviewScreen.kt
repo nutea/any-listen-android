@@ -21,12 +21,12 @@ import io.github.nutea.anylisten.ui.*
 @Composable
 fun LibraryScreen(vm: AppViewModel, onOpenPlaylist: (Playlist) -> Unit, onSearch: () -> Unit) {
     val state by vm.library.collectAsState()
-    LibraryOverviewContent(state, vm::artworkUrl, onOpenPlaylist, onSearch, vm::refresh, vm::playlistArtworkUrl)
+    LibraryOverviewContent(state, vm::artworkUrl, onOpenPlaylist, onSearch, vm::playlistArtworkUrl)
 }
 
 @Composable
 fun LibraryOverviewContent(state: LibraryUiState, artwork: (Track?) -> String?,
-    onOpenPlaylist: (Playlist) -> Unit, onSearch: () -> Unit, onRefresh: () -> Unit,
+    onOpenPlaylist: (Playlist) -> Unit, onSearch: () -> Unit,
     playlistArtwork: (Playlist) -> String? = { it.coverUrl }) {
     val builtins = listOf("love", "last_played", "default")
     val custom = state.snapshot.playlists.filter { it.id !in builtins }
@@ -35,9 +35,7 @@ fun LibraryOverviewContent(state: LibraryUiState, artwork: (Track?) -> String?,
             Row(Modifier.padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.library_title), Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
                 IconButton(onClick = onSearch) { Icon(Icons.Default.Search, stringResource(R.string.show_search)) }
-                IconButton(onClick = onRefresh, enabled = !state.refreshing) { Icon(Icons.Default.Refresh, stringResource(R.string.library_refresh)) }
             }
-            if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
             if (state.snapshot.offline) Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { Notice(stringResource(R.string.offline_banner)) }
             state.error?.let { Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { Notice(it, error = true) } }
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -62,7 +60,7 @@ fun LibraryOverviewContent(state: LibraryUiState, artwork: (Track?) -> String?,
         }
         items(custom, key = { it.id }) { playlist ->
             Row(Modifier.fillMaxWidth().testTag("playlist_${playlist.id}").clickable { onOpenPlaylist(playlist) }.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Artwork(playlistArtwork(playlist) ?: artwork(state.snapshot.tracksByPlaylist[playlist.id]?.firstOrNull()), Modifier.size(58.dp), playlist.name, 12.dp)
+                Artwork(playlistArtwork(playlist) ?: artwork(state.snapshot.tracksByPlaylist[playlist.id]?.firstOrNull()), Modifier.size(58.dp), playlist.name, 12.dp, playlist = true)
                 Column(Modifier.weight(1f)) {
                     Text(playlist.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(stringResource(R.string.track_count, playlist.trackCount), Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

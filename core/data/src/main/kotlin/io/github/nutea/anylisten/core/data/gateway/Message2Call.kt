@@ -1,5 +1,8 @@
 package io.github.nutea.anylisten.core.data.gateway
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -47,6 +50,11 @@ class Message2Call(
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JsonElement?>>()
     private val closed = AtomicReference<IpcClosedException?>(null)
 
+    private val dirtyLibrary = PendingLibraryChanges()
+    fun takeLibraryChange() = dirtyLibrary.take()
+    private val _libraryChanges = MutableStateFlow(0L)
+    val libraryChanges = _libraryChanges.asStateFlow()
+
     val isClosed: Boolean get() = closed.get() != null
 
     suspend fun call(pathname: List<String>, args: List<JsonElement> = emptyList()): JsonElement? {
@@ -70,8 +78,8 @@ class Message2Call(
                     slot.completeExceptionally(error)
                 }
             }
-            return withTimeoutOrNull(callTimeoutMs) { slot.await() }
-                ?: throw IpcTimeoutException("IPC call timed out")
+            return (withTimeoutOrNull(callTimeoutMs) { Result.success(slot.await()) }
+                ?: throw IpcTimeoutException("IPC call timed out")).getOrThrow()
         } finally {
             pending.remove(name)
         }
@@ -83,9 +91,13 @@ class Message2Call(
      */
     fun dispatch(raw: String) {
         try {
-            if (raw == PING) return
+            if (raw == PING || isClosed) return
             val element = json.parseToJsonElement(raw)
             if (element !is JsonArray || element.isEmpty()) return
+            if (element[0].jsonPrimitive.content.toIntOrNull() == 0) {
+                dispatchRequest(element)
+                return
+            }
             if (element[0].jsonPrimitive.content.toIntOrNull() != RESPONSE || element.size < 3) return
             val slot = pending.remove(element[1].jsonPrimitive.content) ?: return
             val error = element[2]
@@ -98,6 +110,23 @@ class Message2Call(
         } catch (_: Throwable) {
             // A malformed frame must not take the reader thread, and therefore the app, down.
         }
+    }
+
+    private fun dispatchRequest(frame: JsonArray) {
+        if (frame.size < 4) return
+        val name = frame[1] as? JsonPrimitive ?: return
+        val path = frame[2] as? JsonArray ?: return
+        val args = frame[3] as? JsonArray ?: return
+        val action = (args.firstOrNull() as? JsonObject)?.get("action") as? JsonPrimitive
+        val supported = path == JsonArray(listOf(JsonPrimitive("listAction"))) &&
+            action?.content?.startsWith("list_") == true
+        if (supported) {
+            dirtyLibrary.add(LibraryChange.from(args.first() as JsonObject))
+            _libraryChanges.update { it + 1 }
+        }
+        // Server remoteQueueList waits for this acknowledgement before its next push.
+        val error = if (supported) JsonNull else obj("message" to JsonPrimitive("Unsupported client call"))
+        send(JsonArray(listOf(JsonPrimitive(RESPONSE), name, error, JsonNull)).toString())
     }
 
     /**
