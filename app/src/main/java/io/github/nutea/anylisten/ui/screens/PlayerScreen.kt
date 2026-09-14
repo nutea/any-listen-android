@@ -340,7 +340,7 @@ fun MiniPlayerContent(
             Row(Modifier.padding(start = 8.dp, end = 2.dp, top = 8.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Artwork(artwork, Modifier.size(40.dp), seed = track.album, radius = 8.dp)
-                TrackHeading(track.title, if (state.isBuffering) stringResource(R.string.playback_loading) else track.artist, Modifier.weight(1f))
+                TrackHeading(track.title, track.artist, Modifier.weight(1f))
                 IconButton(onClick = onToggle) { PlaybackToggleGlyph(state) }
                 IconButton(onClick = onNext) { Icon(Icons.Default.SkipNext, stringResource(R.string.cd_next)) }
                 IconButton(onClick = onQueue) {
@@ -387,9 +387,6 @@ private fun PlaybackSlider(state: PlayerUiState, onSeek: (Long) -> Unit) {
                 thumbTrackGapSize = 0.dp, drawStopIndicator = null) })
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(formatMs(if (dragging != null) (progress * duration).toLong() else state.positionMs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (state.isBuffering) Text(stringResource(R.string.playback_loading),
-                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.testTag("playback_loading_label"))
             Text(formatMs(duration), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
