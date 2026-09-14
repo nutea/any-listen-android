@@ -29,7 +29,7 @@ CI 跑构建、单测和 Lint，使用 fixture，不连私人生产服务。签�
 
 ## 发布
 
-签名步骤见 [RELEASE.md](RELEASE.md)。产物包含 APK、SHA-256、`versionName` / `versionCode`、兼容服务端版本。正式包不携带测试密码、私人域名或详细网络日志。卸载会删除应用私有下载。
+签名步骤见 [RELEASE.md](RELEASE.md)。优先用标签推送触发 CI，由仓库 Secrets 签名并挂到 GitHub Release；本地 `keystore.properties` 仅可选。产物包含 APK、SHA-256、`versionName` / `versionCode`、兼容服务端版本。正式包不携带测试密码、私人域名或详细网络日志。卸载会删除应用私有下载。
 
 ## 参考
 
