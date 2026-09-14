@@ -142,19 +142,21 @@ class RecentlyPlayedRecorder(private val library: LibraryRepository) {
     private val lastMusicId = AtomicReference<String?>(null)
     private val mutex = Mutex()
 
-    suspend fun onTrackStarted(track: Track, sourceListId: String?) = mutex.withLock {
-        if (RecentlyPlayed.skipBecauseSourceIsRecent(sourceListId)) return
-        val musicId = track.identity.remoteTrackId
-        if (musicId.isBlank() || lastMusicId.get() == musicId) return
-        val previous = lastMusicId.get()
-        lastMusicId.set(musicId)
-        try {
-            library.recordPlay(track, sourceListId)
-        } catch (cancelled: CancellationException) {
-            lastMusicId.compareAndSet(musicId, previous)
-            throw cancelled
-        } catch (_: Exception) {
-            lastMusicId.compareAndSet(musicId, previous)
+    suspend fun onTrackStarted(track: Track, sourceListId: String?) {
+        mutex.withLock {
+            if (RecentlyPlayed.skipBecauseSourceIsRecent(sourceListId)) return@withLock
+            val musicId = track.identity.remoteTrackId
+            if (musicId.isBlank() || lastMusicId.get() == musicId) return@withLock
+            val previous = lastMusicId.get()
+            lastMusicId.set(musicId)
+            try {
+                library.recordPlay(track, sourceListId)
+            } catch (cancelled: CancellationException) {
+                lastMusicId.compareAndSet(musicId, previous)
+                throw cancelled
+            } catch (_: Exception) {
+                lastMusicId.compareAndSet(musicId, previous)
+            }
         }
     }
 }
