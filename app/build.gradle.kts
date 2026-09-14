@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.nutea.anylisten"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.1.1-beta.5"
+        versionCode = 9
+        versionName = "0.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
