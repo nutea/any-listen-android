@@ -72,21 +72,84 @@ class OfflineAssets(
     private val lyricLocks = Array(32) { Mutex() }
     private val coverLocks = Array(32) { Mutex() }
     private val catalogLock = Any()
+    private val streamLocks = Array(32) { Any() }
+    private val streamAssemblers = ConcurrentHashMap<String, StreamCacheAssembler>()
     private val streamEpoch = java.util.concurrent.atomic.AtomicLong()
     fun streamToken(): Long = streamEpoch.get()
+
+    /**
+     * Record playback bytes at their file offsets. Safe to call from a Media3 loader thread.
+     * A completed file is published synchronously from [StreamCacheSink.close] so the cache
+     * index exists before the player reports the next state.
+     */
+    fun openStreamSink(track: Track, url: String, position: Long, openedLength: Long, token: Long = streamEpoch.get()): StreamCacheSink? {
+        if (!automaticAudioCaching || token != streamEpoch.get()) return null
+        val gate = streamLocks[(track.cacheKey.hashCode() and Int.MAX_VALUE) % streamLocks.size]
+        synchronized(gate) {
+            if (!automaticAudioCaching || token != streamEpoch.get()) return null
+            if (audioFile(track.cacheKey) != null) return null
+            val assembler = streamAssemblers.getOrPut(track.cacheKey) {
+                StreamCacheAssembler(
+                    part = file(track.cacheKey, ".stream.part"),
+                    meta = file(track.cacheKey, ".stream.ranges"),
+                    complete = file(track.cacheKey, ".audio"),
+                )
+            }
+            assembler.opened(position, openedLength)
+            return object : StreamCacheSink {
+                override fun write(position: Long, buffer: ByteArray, offset: Int, count: Int) {
+                    synchronized(gate) {
+                        if (!automaticAudioCaching || token != streamEpoch.get() || audioFile(track.cacheKey) != null) return
+                        assembler.write(position, buffer, offset, count)
+                    }
+                }
+
+                override fun close(endOfInput: Boolean) {
+                    synchronized(gate) {
+                        if (token != streamEpoch.get()) {
+                            assembler.discard()
+                            streamAssemblers.remove(track.cacheKey, assembler)
+                            return
+                        }
+                        if (audioFile(track.cacheKey) != null) {
+                            assembler.discard()
+                            streamAssemblers.remove(track.cacheKey, assembler)
+                            return
+                        }
+                        if (!automaticAudioCaching) return
+                        if (!assembler.finish(endOfInput)) return
+                        streamAssemblers.remove(track.cacheKey, assembler)
+                        val destination = file(track.cacheKey, ".audio")
+                        if (!destination.isFile || destination.length() == 0L) return
+                        runCatching { downloader.revalidator.recordDownloaded(url, destination, null, null) }
+                        remember(track)
+                        changes.update { it + 1 }
+                    }
+                }
+            }
+        }
+    }
 
     /** Adopt bytes already consumed by playback; never fetch the resource a second time. */
     suspend fun adoptStream(track: Track, url: String, temporary: File, token: Long) = withContext(Dispatchers.IO) {
         try {
-            lock(audioLocks, track.cacheKey).withLock {
-                if (!automaticAudioCaching || token != streamEpoch.get() || !temporary.isFile || temporary.length() == 0L) return@withLock
-                if (audioFile(track.cacheKey) != null) return@withLock
-                directory.mkdirs()
-                val destination = file(track.cacheKey, ".audio")
-                Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                runCatching { downloader.revalidator.recordDownloaded(url,destination,null,null) }
-                remember(track)
-                changes.update { it + 1 }
+            if (!automaticAudioCaching || token != streamEpoch.get() || !temporary.isFile || temporary.length() == 0L) return@withContext
+            val sink = openStreamSink(track, url, 0L, temporary.length(), token) ?: return@withContext
+            try {
+                temporary.inputStream().use { input ->
+                    val buffer = ByteArray(16_384)
+                    var position = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        sink.write(position, buffer, 0, count)
+                        position += count
+                    }
+                }
+                sink.close(endOfInput = true)
+            } catch (error: Exception) {
+                runCatching { sink.close(endOfInput = false) }
+                throw error
             }
         } finally { temporary.delete() }
     }
@@ -231,22 +294,28 @@ class OfflineAssets(
 
     suspend fun clearAudio() = withContext(Dispatchers.IO) {
         streamEpoch.incrementAndGet()
+        streamAssemblers.values.forEach { it.discard() }
+        streamAssemblers.clear()
         val pending = synchronized(jobs) { jobs.values.toList().also { jobs.clear() } }
         pending.forEach { it.cancel() }
         pending.joinAll()
-        directory.listFiles().orEmpty().filter { it.name.endsWith(".audio") || it.name.endsWith(".audio.part") }
+        directory.listFiles().orEmpty().filter {
+            it.name.endsWith(".audio") || it.name.endsWith(".audio.part") ||
+                it.name.endsWith(".stream.part") || it.name.endsWith(".stream.ranges")
+        }
             .forEach { if (it.name.endsWith(".audio")) downloader.revalidator.remove(it) else it.delete() }
     }
 
     suspend fun clearTrack(cacheKey: String) = withContext(Dispatchers.IO) {
         streamEpoch.incrementAndGet()
+        streamAssemblers.remove(cacheKey)?.discard()
         synchronized(jobs) { jobs.remove(cacheKey) }?.cancelAndJoin()
         synchronized(extraJobs) { extraJobs.remove(cacheKey) }?.cancelAndJoin()
         synchronized(lyricJobs) { lyricJobs.remove(cacheKey) }?.cancelAndJoin()
         synchronized(coverJobs) { coverJobs.remove(cacheKey) }?.cancelAndJoin()
         lock(audioLocks,cacheKey).withLock { lock(lyricLocks,cacheKey).withLock { lock(coverLocks,cacheKey).withLock {
         downloader.revalidator.remove(file(cacheKey,".audio"))
-        listOf(".audio", ".audio.part", ".audio.http.json", ".lrc.checked", ".cover.checked", ".cover.source", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
+        listOf(".audio", ".audio.part", ".audio.http.json", ".stream.part", ".stream.ranges", ".lrc.checked", ".cover.checked", ".cover.source", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
             .forEach { file(cacheKey, it).delete() }
         coverUrls.remove(cacheKey)
         sidecarFailures.remove(cacheKey + ".lrc")
@@ -257,7 +326,9 @@ class OfflineAssets(
     }
 
     fun audioBytes(): Long = directory.listFiles().orEmpty()
-        .filter { it.name.endsWith(".audio") || it.name.endsWith(".audio.part") }.sumOf { it.length() }
+        .filter {
+            it.name.endsWith(".audio") || it.name.endsWith(".audio.part") || it.name.endsWith(".stream.part")
+        }.sumOf { it.length() }
 
     fun resourceBytes(): Long = directory.listFiles().orEmpty()
         .filter { file -> RESOURCE_SUFFIXES.any { file.name.endsWith(it) } }.sumOf { it.length() }

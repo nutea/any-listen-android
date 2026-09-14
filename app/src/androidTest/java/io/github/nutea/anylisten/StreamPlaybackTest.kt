@@ -56,9 +56,17 @@ class StreamPlaybackTest {
                     return n
                 }
             }
-            StreamingCacheDataSource(slow, File(root,"recording"), { true }) { spec, file ->
-                runBlocking { assets.adoptStream(track, spec.uri.toString(), file, assets.streamToken()) }
-                saved.countDown()
+            StreamingCacheDataSource(slow, { true }) { spec, openedLength ->
+                val inner = assets.openStreamSink(track, spec.uri.toString(), spec.position, openedLength)
+                object : StreamCacheSink {
+                    override fun write(position: Long, buffer: ByteArray, offset: Int, count: Int) {
+                        inner?.write(position, buffer, offset, count)
+                    }
+                    override fun close(endOfInput: Boolean) {
+                        inner?.close(endOfInput)
+                        if (assets.audioFile(track.cacheKey) != null) saved.countDown()
+                    }
+                }
             }
         }
         var player: ExoPlayer? = null
@@ -92,11 +100,14 @@ class StreamPlaybackTest {
 
     @Test fun interruptedSeekedAndDisabledStreamsNeverBecomeCompleteFiles() {
         val root = File(instrumentation.targetContext.cacheDir, "stream-partial-${System.nanoTime()}").apply { mkdirs() }
-        var completions = 0
         var enabled = true
+        val http = OkHttpClient()
+        val assets = OfflineAssets(File(root,"offline"), MockAnyListenGateway(), FileDownloader(http), ArtworkStore(File(root,"art"), http)) { uri.toString() }
         try {
             fun readPart(position: Long, disable: Boolean) {
-                val source = StreamingCacheDataSource(ByteArrayDataSource(wave()), root, { enabled }) { _, file -> completions++; file.delete() }
+                val source = StreamingCacheDataSource(ByteArrayDataSource(wave()), { enabled }) { spec, length ->
+                    assets.openStreamSink(track, spec.uri.toString(), spec.position, length)
+                }
                 source.open(DataSpec.Builder().setUri(uri).setPosition(position).build())
                 source.read(ByteArray(4096), 0, 4096)
                 if (disable) enabled = false
@@ -105,8 +116,37 @@ class StreamPlaybackTest {
             readPart(0, false)
             readPart(10000, false)
             readPart(0, true)
-            assertEquals(0, completions)
-            assertTrue(root.listFiles().orEmpty().isEmpty())
+            assertNull(assets.audioFile(track.cacheKey))
+            assertTrue(LocalInventory.cached(assets.catalog(), assets::inspect, emptySet()).isEmpty())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun seekedReopensAssembleOneOfflineFileAndCatalogEntry() {
+        val root = File(instrumentation.targetContext.cacheDir, "stream-seek-${System.nanoTime()}").apply { mkdirs() }
+        val payload = wave()
+        val http = OkHttpClient()
+        val assets = OfflineAssets(File(root,"offline"), MockAnyListenGateway(), FileDownloader(http), ArtworkStore(File(root,"art"), http)) { uri.toString() }
+        try {
+            fun session(position: Long, count: Int, untilEnd: Boolean) {
+                val source = StreamingCacheDataSource(ByteArrayDataSource(payload), { true }) { spec, length ->
+                    assets.openStreamSink(track, spec.uri.toString(), spec.position, length)
+                }
+                source.open(DataSpec.Builder().setUri(uri).setPosition(position).build())
+                var remaining = count
+                val buffer = ByteArray(2048)
+                while (remaining > 0) {
+                    val n = source.read(buffer, 0, minOf(buffer.size, remaining))
+                    if (n < 0) break
+                    remaining -= n
+                }
+                if (untilEnd) while (source.read(buffer, 0, buffer.size) >= 0) { }
+                source.close()
+            }
+            session(0, 4096, untilEnd = false)
+            assertNull(assets.audioFile(track.cacheKey))
+            session(4096, payload.size - 4096, untilEnd = true)
+            assertArrayEquals(payload, assets.audioFile(track.cacheKey)!!.readBytes())
+            assertEquals(listOf(track.cacheKey), LocalInventory.cached(assets.catalog(), assets::inspect, emptySet()).map { it.cacheKey })
         } finally { root.deleteRecursively() }
     }
 

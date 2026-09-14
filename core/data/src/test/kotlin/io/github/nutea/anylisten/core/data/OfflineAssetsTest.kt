@@ -399,4 +399,43 @@ class OfflineAssetsTest {
         assertEquals(SidecarState.NONE, none.inspect(track.cacheKey).cover)
         assertTrue(none.lyrics(track).lines.isEmpty())
     }
+
+    @Test fun seekedPlaybackSessionsPublishOneCatalogAudioFile() = runBlocking {
+        val dir = temp.newFolder()
+        val http = OkHttpClient()
+        val assets = OfflineAssets(dir, MockAnyListenGateway(), FileDownloader(http), ArtworkStore(temp.newFolder(), http)) { "https://example.test" }
+        val body = ByteArray(20_000) { it.toByte() }
+        val url = "https://example.test/audio"
+        val first = assets.openStreamSink(track, url, 0, body.size.toLong())!!
+        first.write(0, body, 0, 4096)
+        first.close(endOfInput = false)
+        assertNull(assets.audioFile(track.cacheKey))
+        assertTrue(LocalInventory.cached(assets.catalog(), assets::inspect, emptySet()).isEmpty())
+
+        val rest = assets.openStreamSink(track, url, 4096, (body.size - 4096).toLong())!!
+        rest.write(4096, body, 4096, body.size - 4096)
+        rest.close(endOfInput = true)
+        assertArrayEquals(body, assets.audioFile(track.cacheKey)!!.readBytes())
+        val listed = LocalInventory.cached(assets.catalog(), assets::inspect, emptySet())
+        assertEquals(listOf(track.cacheKey), listed.map { it.cacheKey })
+        assertTrue(listed.single().completeness.audioReady)
+
+        assets.clearTrack(track.cacheKey)
+        assertNull(assets.audioFile(track.cacheKey))
+        assertTrue(LocalInventory.cached(assets.catalog(), assets::inspect, emptySet()).isEmpty())
+    }
+
+    @Test fun staleStreamTokenDoesNotPublishAfterCacheClear() = runBlocking {
+        val dir = temp.newFolder()
+        val http = OkHttpClient()
+        val assets = OfflineAssets(dir, MockAnyListenGateway(), FileDownloader(http), ArtworkStore(temp.newFolder(), http)) { "https://example.test" }
+        val body = "full-audio".toByteArray()
+        val token = assets.streamToken()
+        val sink = assets.openStreamSink(track, "https://example.test/audio", 0, body.size.toLong(), token)!!
+        sink.write(0, body, 0, body.size)
+        assets.clearAudio()
+        sink.close(endOfInput = true)
+        assertNull(assets.audioFile(track.cacheKey))
+        assertTrue(assets.catalog().isEmpty())
+    }
 }
