@@ -1,14 +1,21 @@
 package io.github.nutea.anylisten.core.data
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.withPermit
+import io.github.nutea.anylisten.core.data.connection.AndroidNetworkMonitor
+import io.github.nutea.anylisten.core.data.connection.ConnectionState
+import io.github.nutea.anylisten.core.data.connection.SessionConnectionManager
+import io.github.nutea.anylisten.core.data.connection.WebSocketIpcChannel
 import io.github.nutea.anylisten.core.data.download.DownloadCoordinator
 import io.github.nutea.anylisten.core.data.download.FileDownloader
 import io.github.nutea.anylisten.core.data.gateway.IpcAuthClient
-import io.github.nutea.anylisten.core.data.gateway.MockAnyListenGateway
 import io.github.nutea.anylisten.core.data.gateway.ProtocolAnyListenGateway
 import io.github.nutea.anylisten.core.data.local.AppDatabase
 import io.github.nutea.anylisten.core.data.repo.LibraryRepository
@@ -20,26 +27,41 @@ class AppContainer(context: Context) {
     private val appContext = context.applicationContext
     private val maintenance = PlaybackMaintenance()
     fun setPlaybackActive(active: Boolean) { maintenance.setActive(active) }
-    val http = NetworkFactory.client()
-    fun dropStaleConnections() = http.dropStaleConnections()
-    fun cancelInFlightCalls() = http.cancelInFlightCalls()
+
+    private val scope = AppScopes.create("container", Dispatchers.Default)
+    private val clients = HttpClients.create()
+
+    /** API/IPC client. Playback must use [mediaHttp] so the two cannot cancel each other. */
+    val http = clients.api
+    val mediaHttp = clients.media
+
     val db = AppDatabase.create(appContext)
     val sessionStore = SecureSessionStore(appContext)
     val settings = AppSettingsStore(appContext)
-    val gateway = ProtocolAnyListenGateway(http, IpcAuthClient(http))
-    val artwork = ArtworkStore(appContext.filesDir.resolve("artwork"), http, { gateway.isOnline() }, { !maintenance.active })
+    val network = AndroidNetworkMonitor(appContext)
+
+    val connection = SessionConnectionManager(
+        store = sessionStore,
+        authenticator = IpcAuthClient(clients.api),
+        channels = WebSocketIpcChannel.Factory(clients.api),
+        network = network,
+        transport = clients,
+        scope = scope,
+    )
+
+    val gateway = ProtocolAnyListenGateway(connection)
+    val artwork = ArtworkStore(appContext.filesDir.resolve("artwork"), clients.api, { gateway.isOnline() }, { !maintenance.active })
     val offlineAssets = OfflineAssets(appContext.filesDir.resolve("offline"), gateway,
-        FileDownloader(http), artwork, { sessionStore.current()?.profile?.baseUrl.orEmpty() })
-    val mockGateway = MockAnyListenGateway()
+        FileDownloader(clients.api), artwork, { sessionStore.current()?.profile?.baseUrl.orEmpty() })
     val library = LibraryRepository(db.libraryDao(), gateway)
-    val session = SessionRepository(sessionStore, gateway) { library.refresh() }
+    val session = SessionRepository(connection)
     val downloadsDir = appContext.filesDir.resolve("downloads").apply { mkdirs() }
     val cacheDir = appContext.cacheDir.resolve("media").apply { mkdirs() }
     val downloads = DownloadCoordinator(
         dao = db.downloadDao(),
         libraryDao = db.libraryDao(),
         gateway = gateway,
-        downloader = FileDownloader(http),
+        downloader = FileDownloader(clients.api),
         downloadsDir = downloadsDir,
         cacheDir = cacheDir,
         usableBytes = { downloadsDir.usableSpace },
@@ -49,6 +71,25 @@ class AppContainer(context: Context) {
         resourceBytes = { artwork.bytes() + offlineAssets.resourceBytes() },
         repairWarning = { appContext.getString(R.string.download_legacy_repair) },
     )
+
+    /** Observable session state for UI and playback; the single source of connection truth. */
+    val connectionState get() = connection.state
+
+    fun start() {
+        connection.start()
+        // Every newly established socket gets one library refresh, and only one: keying on the
+        // generation keeps a link flap from re-fetching the whole library.
+        scope.launch {
+            connection.state
+                .map { (it as? ConnectionState.Online)?.generation ?: 0L }
+                .distinctUntilChanged()
+                .filter { it != 0L }
+                .collect { runCatching { library.refresh() } }
+        }
+        if (sessionStore.current() != null) connection.requestConnect()
+    }
+
+    fun isConnected(): Boolean = connection.state.value is ConnectionState.Online
 
     /** Only refresh resources already retained on this device; never download a whole new library. */
     suspend fun refreshCachedResources(force: Boolean = false) = maintenance.run {

@@ -45,7 +45,7 @@
 ## 测试
 
 ```powershell
-.\gradlew.bat :core:model:test :core:data:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+.\gradlew.bat :core:model:test :core:data:testDebugUnitTest :core:playback:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
 # 需要连接设备或启动模拟器
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```

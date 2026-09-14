@@ -6,9 +6,6 @@ import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -23,6 +20,8 @@ import io.github.nutea.anylisten.AnyListenApp
 import io.github.nutea.anylisten.BuildConfig
 import io.github.nutea.anylisten.R
 import io.github.nutea.anylisten.core.data.AppContainer
+import io.github.nutea.anylisten.core.data.AppScopes
+import io.github.nutea.anylisten.core.data.connection.ConnectionState
 import io.github.nutea.anylisten.core.data.gateway.UrlNormalizer
 import io.github.nutea.anylisten.core.data.session.PersistedPlayback
 import io.github.nutea.anylisten.core.data.session.StoredSession
@@ -48,16 +47,19 @@ import io.github.nutea.anylisten.core.model.ThemeMode
 import io.github.nutea.anylisten.ui.screens.LocalBatchAction
 import io.github.nutea.anylisten.core.model.TrackIdentity
 import io.github.nutea.anylisten.core.playback.PendingPlayback
-import io.github.nutea.anylisten.core.playback.PlaybackReconnect
 import io.github.nutea.anylisten.core.playback.PlaybackService
 import io.github.nutea.anylisten.core.playback.removeQueuedTrack
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -65,6 +67,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 data class ConnectUiState(
     val url: String = "",
@@ -138,7 +142,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var lyricsForKey: String? = null
     private var lyricsJob: kotlinx.coroutines.Job? = null
     private var lyricsAttemptAt = 0L
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastPersistAt = 0L
 
     private val playerListener = object : Player.Listener {
@@ -153,7 +156,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         applyStoredSession(container.sessionStore.current())
-        viewModelScope.launch {
+        safeLaunch {
             container.library.observeLibrary().collect { snap ->
                 _library.update { state ->
                     val selected = state.selected?.let { current -> snap.playlists.find { it.id == current.id } }
@@ -174,7 +177,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (_player.value.queue.isEmpty()) restorePlayback()
             }
         }
-        viewModelScope.launch {
+        safeLaunch {
             combine(container.downloads.observe(), container.library.observeLibrary()) { records, snap ->
                 records to snap
             }.collect { (records, snap) ->
@@ -182,7 +185,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 rebuildLocalInventory(records, snap)
             }
         }
-        viewModelScope.launch {
+        safeLaunch {
             container.offlineAssets.updates.debounce(150).collect {
                 val candidates = _library.value.snapshot.tracksByPlaylist.values.flatten() + _player.value.queue
                 val covers = withContext(Dispatchers.IO) {
@@ -202,21 +205,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 rebuildLocalInventory(_downloads.value, _library.value.snapshot)
             }
         }
-        viewModelScope.launch {
+        safeLaunch {
             while (isActive) {
                 delay(io.github.nutea.anylisten.core.data.CACHE_CHECK_INTERVAL_MS)
                 container.refreshCachedResources()
             }
         }
-        viewModelScope.launch { container.settings.themeMode.collect { _themeMode.value = it } }
-        viewModelScope.launch { container.settings.autoCacheAudio.collect { _autoCacheAudio.value = it } }
-        viewModelScope.launch {
+        safeLaunch { container.settings.themeMode.collect { _themeMode.value = it } }
+        safeLaunch { container.settings.autoCacheAudio.collect { _autoCacheAudio.value = it } }
+        observeConnection()
+        safeLaunch {
             restoreSession()
             refreshStorage()
-            registerNetworkCallback()
             restorePlayback()
         }
-        viewModelScope.launch {
+        safeLaunch {
             while (isActive) {
                 controller?.let { publishController(it) }
                 delay(if (controller?.isPlaying == true) 400L else 1_000L)
@@ -247,7 +250,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun testHello() {
-        viewModelScope.launch {
+        safeLaunch {
             _connect.update { it.copy(busy = true, error = null, helloOk = null) }
             runCatching {
                 val client = io.github.nutea.anylisten.core.data.gateway.IpcAuthClient(container.http)
@@ -262,7 +265,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun login() {
-        viewModelScope.launch {
+        safeLaunch {
             _connect.update { it.copy(busy = true, error = null) }
             runCatching { container.session.login(_connect.value.url, _connect.value.password) }
                 .onSuccess {
@@ -278,9 +281,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        safeLaunch {
             _library.update { it.copy(refreshing = true, error = null) }
-            runCatching { container.library.refresh(); viewModelScope.launch { container.refreshCachedResources(); refreshStorage() }; refreshStorage() }
+            runCatching { container.library.refresh(); safeLaunch { container.refreshCachedResources(); refreshStorage() }; refreshStorage() }
                 .onFailure { error -> _library.update { it.copy(error = message(error)) } }
             _library.update { it.copy(refreshing = false) }
         }
@@ -308,12 +311,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playLast() {
-        viewModelScope.launch {
+        safeLaunch {
             restorePlayback()
             val state = _player.value
             if (state.queue.isNotEmpty()) {
                 play(state.queue, state.track, state.positionMs, state.laterKeys)
-                return@launch
+                return@safeLaunch
             }
             val completed = _downloads.value.firstOrNull { it.status == DownloadStatus.COMPLETED }
             if (completed != null) playDownload(completed)
@@ -443,7 +446,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             c?.stop()
             c?.clearMediaItems()
             _player.value = PlayerUiState(shuffled = state.shuffled, repeat = state.repeat)
-            viewModelScope.launch { container.settings.setPlayback(PersistedPlayback()) }
+            safeLaunch { container.settings.setPlayback(PersistedPlayback()) }
         } else {
             persistPlayback(force = true)
         }
@@ -492,7 +495,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun download(tracks: List<Track>) {
-        viewModelScope.launch {
+        safeLaunch {
             runCatching { container.downloads.enqueue(tracks) }
                 .onSuccess {
                     _library.update {
@@ -525,7 +528,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun favorite(track: Track) {
-        viewModelScope.launch {
+        safeLaunch {
             runCatching { container.library.addToPlaylist(ProtocolConstants.LIST_LOVE, track) }
                 .onSuccess {
                     _library.update { it.copy(error = null, status = applicationContext.getString(R.string.added_to_favorites)) }
@@ -543,7 +546,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             removeFromPlaylist(playlist.id, tracks.first())
             return
         }
-        viewModelScope.launch {
+        safeLaunch {
             var ok = 0
             var fail = 0
             var lastError: Throwable? = null
@@ -575,7 +578,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmAddToPlaylist(playlist: Playlist) {
         val tracks = _library.value.pendingAdd ?: return
         _library.update { it.copy(pendingAdd = null) }
-        viewModelScope.launch {
+        safeLaunch {
             var ok = 0
             var fail = 0
             var lastError: Throwable? = null
@@ -607,7 +610,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun batchLocal(tab: Int, keys: List<String>, action: LocalBatchAction) = viewModelScope.launch {
+    fun batchLocal(tab: Int, keys: List<String>, action: LocalBatchAction) = safeLaunch {
         val keySet = keys.toSet()
         val assets = (if (tab == 0) _downloadedAssets.value else _cachedAssets.value).filter { it.cacheKey in keySet }
         val tracks = assets.filter { it.completeness.audioReady }.map { it.track }
@@ -622,36 +625,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshStorage()
     }
 
-    fun retryDownload(cacheKey: String) = viewModelScope.launch { container.downloads.retry(cacheKey) }
-    fun removeDownloadTask(cacheKey: String) = viewModelScope.launch {
+    fun retryDownload(cacheKey: String) = safeLaunch { container.downloads.retry(cacheKey) }
+    fun removeDownloadTask(cacheKey: String) = safeLaunch {
         container.downloads.removeTask(cacheKey)
         refreshStorage()
     }
 
-    fun cancelDownload(cacheKey: String) = viewModelScope.launch { container.downloads.cancel(cacheKey) }
-    fun deleteDownload(cacheKey: String) = viewModelScope.launch {
+    fun cancelDownload(cacheKey: String) = safeLaunch { container.downloads.cancel(cacheKey) }
+    fun deleteDownload(cacheKey: String) = safeLaunch {
         container.downloads.deleteLocal(cacheKey)
         refreshStorage()
         rebuildLocalInventory(_downloads.value, _library.value.snapshot)
     }
 
-    fun deleteCache(cacheKey: String) = viewModelScope.launch {
+    fun deleteCache(cacheKey: String) = safeLaunch {
         container.offlineAssets.clearTrack(cacheKey)
         refreshStorage()
         rebuildLocalInventory(_downloads.value, _library.value.snapshot)
     }
 
-    fun resumeDownloads() = viewModelScope.launch { container.downloads.resumePaused(); container.refreshCachedResources() }
+    fun resumeDownloads() = safeLaunch { container.downloads.resumePaused(); container.refreshCachedResources() }
 
-    fun setThemeMode(value: ThemeMode) = viewModelScope.launch { container.settings.setThemeMode(value) }
+    fun setThemeMode(value: ThemeMode) = safeLaunch { container.settings.setThemeMode(value) }
 
-    fun setAutoCacheAudio(value: Boolean) = viewModelScope.launch {
+    fun setAutoCacheAudio(value: Boolean) = safeLaunch {
         container.settings.setAutoCacheAudio(value)
         container.offlineAssets.setAutomaticAudioCaching(value)
     }
 
     fun logout() {
-        viewModelScope.launch {
+        safeLaunch {
             container.session.logout()
             _signedIn.value = false
             _profile.value = null
@@ -687,7 +690,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearPlaybackCache() {
-        viewModelScope.launch(Dispatchers.IO) {
+        safeLaunch(Dispatchers.IO) {
             container.offlineAssets.clearAudio()
             container.cacheDir.deleteRecursively()
             container.cacheDir.mkdirs()
@@ -699,7 +702,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun shareDiagnostics(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
+        safeLaunch(Dispatchers.IO) {
             val dir = File(applicationContext.filesDir, "diagnostics").apply { mkdirs() }
             val file = File(dir, "anylisten-diagnostics.txt")
             file.writeText(diagnosticsText())
@@ -831,7 +834,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val now = System.currentTimeMillis()
         if (!force && now - lastPersistAt < 1_500L) return
         lastPersistAt = now
-        viewModelScope.launch {
+        safeLaunch {
             container.settings.setPlayback(
                 PersistedPlayback(
                     cacheKeys = state.queue.map { it.cacheKey },
@@ -895,7 +898,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (lyricsForKey != track.cacheKey) _player.update { it.copy(lyrics = null) }
         lyricsForKey = track.cacheKey
         lyricsAttemptAt = now
-        lyricsJob = viewModelScope.launch {
+        lyricsJob = safeLaunch {
             // Restored/download-only queue metadata may omit isLocal, filePath and deviceId.
             val fullTrack = container.library.cachedTrack(track.cacheKey) ?: track
             val lyrics = try { container.offlineAssets.lyrics(fullTrack) }
@@ -906,7 +909,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun removeFromPlaylist(playlistId: String, track: Track) {
-        viewModelScope.launch {
+        safeLaunch {
             runCatching { container.library.removeFromPlaylist(playlistId, track) }
                 .onSuccess {
                     val name = _library.value.snapshot.playlists.find { it.id == playlistId }
@@ -945,45 +948,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun registerNetworkCallback() {
-        val cm = applicationContext.getSystemService(ConnectivityManager::class.java) ?: return
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            private var availableNetwork: Network? = null
-            private var observedDefaultNetwork = false
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                val usable = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                if (usable) {
-                    if (availableNetwork != network) {
-                        val networkChanged = observedDefaultNetwork
-                        availableNetwork = network
-                        observedDefaultNetwork = true
-                        if (PlaybackReconnect.shouldRebuildSession(container.gateway.isOnline(), networkChanged)) {
-                            onNetworkUsable()
-                        } else {
-                            resumeDownloads()
-                        }
-                    }
-                } else if (availableNetwork == network) availableNetwork = null
-            }
-            override fun onLost(network: Network) {
-                if (availableNetwork == network) {
-                    availableNetwork = null
-                    container.dropStaleConnections()
-                    container.cancelInFlightCalls()
+    /**
+     * The view model no longer registers its own `ConnectivityManager` callback and no longer
+     * runs its own restore. The connection manager owns both; this only reacts to each new
+     * session so downloads resume and the sign-in state stays truthful.
+     */
+    private fun observeConnection() {
+        safeLaunch {
+            container.connection.state
+                .map { (it as? ConnectionState.Online)?.generation ?: 0L }
+                .distinctUntilChanged()
+                .collect { generation ->
+                    if (generation == 0L) return@collect
+                    _signedIn.value = true
+                    _profile.value = container.sessionStore.current()?.profile ?: _profile.value
+                    _connect.update { it.copy(busy = false, error = null) }
+                    bindPlayer()
+                    PlaybackService.service?.recoverConnection()
+                    resumeDownloads()
                 }
-            }
-        }
-        networkCallback = callback
-        runCatching { cm.registerDefaultNetworkCallback(callback) }
-    }
-
-    private fun onNetworkUsable() {
-        viewModelScope.launch {
-            container.dropStaleConnections()
-            runCatching { withContext(Dispatchers.IO) { container.session.restore() } }
-            PlaybackService.service?.recoverConnection()
-            resumeDownloads()
         }
     }
 
@@ -993,7 +976,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshLocal() {
-        viewModelScope.launch { rebuildLocalInventory(_downloads.value, _library.value.snapshot) }
+        safeLaunch { rebuildLocalInventory(_downloads.value, _library.value.snapshot) }
     }
 
     private suspend fun rebuildLocalInventory(records: List<DownloadRecord>, snap: LibrarySnapshot) {
@@ -1051,13 +1034,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        networkCallback?.let { callback ->
-            val cm = applicationContext.getSystemService(ConnectivityManager::class.java)
-            runCatching { cm?.unregisterNetworkCallback(callback) }
-        }
         releasePlayer()
         super.onCleared()
     }
+
+    /**
+     * `viewModelScope` has no exception handler of its own, so an unhandled failure in any of
+     * these background collectors would reach the thread's default handler and kill the app.
+     */
+    private fun safeLaunch(
+        context: CoroutineContext = EmptyCoroutineContext,
+        block: suspend CoroutineScope.() -> Unit,
+    ): Job = viewModelScope.launch(context + AppScopes.handler("viewmodel"), block = block)
 
     private val applicationContext: Context
         get() = getApplication<Application>().applicationContext

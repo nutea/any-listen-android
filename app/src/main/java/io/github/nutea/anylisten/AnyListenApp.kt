@@ -11,5 +11,6 @@ class AnyListenApp : Application(), ContainerHolder {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        container.start()
     }
 }

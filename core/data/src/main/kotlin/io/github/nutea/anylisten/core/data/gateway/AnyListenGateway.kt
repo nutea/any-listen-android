@@ -11,10 +11,11 @@ data class SessionInfo(
     val token: String,
 )
 
+/**
+ * Server capabilities the app consumes. Signing in, reconnecting and socket ownership belong to
+ * `SessionConnectionManager`; a gateway only knows how to ask a live session for data.
+ */
 interface AnyListenGateway {
-    suspend fun login(baseUrl: String, password: String): SessionInfo
-    suspend fun restore(profile: ServerProfile, token: String): SessionInfo
-    suspend fun logout()
     suspend fun refreshLibrary(): LibrarySnapshot
     suspend fun resolveMedia(track: Track, refresh: Boolean = false): MediaResource
     suspend fun resolveCover(track: Track): String?

@@ -27,7 +27,7 @@ jobs:
       - name: Unit tests and lint
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :core:model:test :core:data:testDebugUnitTest :app:lintDebug :app:assembleDebug
+          ./gradlew --no-daemon :core:model:test :core:data:testDebugUnitTest :core:playback:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
   release:
     name: sign-and-publish
