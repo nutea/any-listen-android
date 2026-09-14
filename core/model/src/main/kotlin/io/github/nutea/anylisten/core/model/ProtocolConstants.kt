@@ -31,8 +31,13 @@ object ProtocolConstants {
     const val LIST_LAST_PLAYED = "last_played"
 
     const val ADD_LOCATION_BOTTOM = "bottom"
+    const val ADD_LOCATION_TOP = "top"
     const val ACTION_MUSIC_ADD = "list_music_add"
     const val ACTION_MUSIC_REMOVE = "list_music_remove"
+    const val ACTION_MUSIC_UPDATE_POSITION = "list_music_update_position"
+
+    /** Web-server `updateLatestPlayList` keeps at most this many `last_played` entries. */
+    const val LAST_PLAYED_LIMIT = 1000
 
     const val PROXY_COOKIE = "p_urlkey"
 }

@@ -138,6 +138,7 @@ data class LibrarySnapshot(
     val tracksByPlaylist: Map<String, List<Track>>,
     val refreshedAtEpochMs: Long,
     val offline: Boolean,
+    val addMusicLocationType: AddMusicLocationType = AddMusicLocationType.TOP,
 )
 
 data class StorageSummary(

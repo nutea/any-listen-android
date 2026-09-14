@@ -92,6 +92,7 @@
     <string name="library_empty_title">音乐库等你填满</string>
     <string name="no_tracks_title">没有找到歌曲</string>
     <string name="playlist_empty_detail">在 Web 中为歌单添加歌曲，然后刷新音乐库。</string>
+    <string name="last_played_empty_detail">播放过的歌曲会显示在这里，最新的在最前。</string>
     <string name="search_empty_detail">试试其他歌名、歌手或专辑关键词。</string>
     <string name="no_playlist_targets">还没有可加入的歌单。</string>
     <string name="track_options">%1$s 的更多操作</string>
@@ -156,6 +157,7 @@
     <string name="sort_title">标题</string>
     <string name="sort_artist">歌手</string>
     <string name="sort_album">专辑</string>
+    <string name="sort_play_time">播放时间</string>
     <string name="selection_count">已选 %1$d · 当前列表 %2$d</string>
     <string name="selection_scope">选择范围仅限当前歌单筛选结果</string>
     <string name="clear_selection">退出多选</string>

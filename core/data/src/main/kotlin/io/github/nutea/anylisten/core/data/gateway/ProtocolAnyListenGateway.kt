@@ -1,6 +1,7 @@
 package io.github.nutea.anylisten.core.data.gateway
 
 import io.github.nutea.anylisten.core.data.connection.SessionConnectionManager
+import io.github.nutea.anylisten.core.model.AddMusicLocationType
 import io.github.nutea.anylisten.core.model.AppError
 import io.github.nutea.anylisten.core.model.ErrorKind
 import io.github.nutea.anylisten.core.model.LibrarySnapshot
@@ -8,6 +9,8 @@ import io.github.nutea.anylisten.core.model.LrcParser
 import io.github.nutea.anylisten.core.model.Lyrics
 import io.github.nutea.anylisten.core.model.MediaResource
 import io.github.nutea.anylisten.core.model.ProtocolConstants
+import io.github.nutea.anylisten.core.model.RecentlyPlayed
+import io.github.nutea.anylisten.core.model.RecentlyPlayedMutation
 import io.github.nutea.anylisten.core.model.Track
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -30,7 +33,11 @@ class ProtocolAnyListenGateway(
     private val connection: SessionConnectionManager,
 ) : AnyListenGateway {
 
+    @Volatile private var lastAddMusicLocationType = AddMusicLocationType.TOP
+
     override fun isOnline(): Boolean = connection.isOnline
+
+    override fun addMusicLocationType(): AddMusicLocationType = lastAddMusicLocationType
 
     private val baseUrl: String
         get() = connection.session.value?.profile?.baseUrl
@@ -54,6 +61,7 @@ class ProtocolAnyListenGateway(
             tracksByPlaylist = tracks,
             refreshedAtEpochMs = System.currentTimeMillis(),
             offline = false,
+            addMusicLocationType = fetchAddMusicLocationType(),
         )
     }
 
@@ -131,6 +139,76 @@ class ProtocolAnyListenGateway(
                     ),
                 )
             }
+        }
+    }
+
+    override suspend fun recordRecentlyPlayed(track: Track, sourceListId: String?): List<Track>? {
+        if (!isOnline()) return null
+        if (RecentlyPlayed.skipBecauseSourceIsRecent(sourceListId)) return null
+        val musicId = track.identity.remoteTrackId
+        if (musicId.isBlank()) return null
+        val addType = fetchAddMusicLocationType()
+        val before = currentIds(ProtocolConstants.LIST_LAST_PLAYED)
+        when (val mutation = RecentlyPlayed.mutation(before, musicId, sourceListId, addType)) {
+            RecentlyPlayedMutation.None -> return null
+            is RecentlyPlayedMutation.Move -> listAction(
+                ProtocolConstants.ACTION_MUSIC_UPDATE_POSITION,
+                Message2Call.obj(
+                    "listId" to JsonPrimitive(ProtocolConstants.LIST_LAST_PLAYED),
+                    "position" to JsonPrimitive(mutation.position),
+                    "ids" to buildJsonArray { add(JsonPrimitive(musicId)) },
+                ),
+            )
+            is RecentlyPlayedMutation.Insert -> {
+                val musicInfo = ProtocolDtos.withCreateTime(ProtocolDtos.trackToProtocol(track), System.currentTimeMillis())
+                listAction(
+                    ProtocolConstants.ACTION_MUSIC_ADD,
+                    Message2Call.obj(
+                        "id" to JsonPrimitive(ProtocolConstants.LIST_LAST_PLAYED),
+                        "musicInfos" to buildJsonArray { add(musicInfo) },
+                        "addMusicLocationType" to JsonPrimitive(mutation.addType.wire),
+                    ),
+                )
+                mutation.trimId?.let { trimId ->
+                    listAction(
+                        ProtocolConstants.ACTION_MUSIC_REMOVE,
+                        Message2Call.obj(
+                            "listId" to JsonPrimitive(ProtocolConstants.LIST_LAST_PLAYED),
+                            "ids" to buildJsonArray { add(JsonPrimitive(trimId)) },
+                        ),
+                    )
+                }
+            }
+        }
+        return lastPlayedTracks()
+    }
+
+    private suspend fun lastPlayedTracks(): List<Track> {
+        val profileId = connection.session.value?.profile?.id
+            ?: throw AppError(ErrorKind.SESSION_EXPIRED, "Not signed in")
+        val musics = connection.withChannel {
+            it.call(listOf("getListMusics"), listOf(JsonPrimitive(ProtocolConstants.LIST_LAST_PLAYED)))
+        }
+        return musics?.jsonArray?.map {
+            val parsed = ProtocolDtos.trackFrom(profileId, ProtocolConstants.LIST_LAST_PLAYED, it.jsonObject)
+            parsed.copy(coverUrl = resolvePublicUrl(parsed.coverUrl) ?: parsed.coverUrl)
+        }.orEmpty()
+    }
+
+    private suspend fun fetchAddMusicLocationType(): AddMusicLocationType {
+        val settings = runCatching {
+            connection.withChannel { it.call(listOf("getSetting")) }?.jsonObject
+        }.getOrNull() ?: return lastAddMusicLocationType
+        lastAddMusicLocationType = ProtocolDtos.addMusicLocationTypeFrom(settings)
+        return lastAddMusicLocationType
+    }
+
+    private suspend fun listAction(action: String, data: JsonObject) {
+        connection.withChannel {
+            it.call(
+                listOf("listAction"),
+                listOf(Message2Call.obj("action" to JsonPrimitive(action), "data" to data)),
+            )
         }
     }
 

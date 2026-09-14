@@ -30,6 +30,7 @@ import io.github.nutea.anylisten.core.model.DownloadRecord
 import io.github.nutea.anylisten.core.model.DownloadStatus
 import io.github.nutea.anylisten.core.model.ErrorKind
 import io.github.nutea.anylisten.core.model.LibrarySnapshot
+import io.github.nutea.anylisten.core.model.LibraryBrowse
 import io.github.nutea.anylisten.core.model.LocalAssetItem
 import io.github.nutea.anylisten.core.model.LocalInventory
 import io.github.nutea.anylisten.core.model.Lyrics
@@ -238,15 +239,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectPlaylist(playlist: Playlist) {
         _library.update { state ->
-            if (state.selected == playlist) state else state.copy(selected = playlist, filtered = filter(state.snapshot, playlist, state.query, state.sort, state.sortAscending))
+            if (state.selected == playlist) state
+            else {
+                val (sort, ascending) = LibraryBrowse.sortForPlaylist(playlist, state.sort, state.sortAscending)
+                state.copy(
+                    selected = playlist,
+                    sort = sort,
+                    sortAscending = ascending,
+                    filtered = filter(state.snapshot, playlist, state.query, sort, ascending),
+                )
+            }
         }
     }
 
     fun openPlaylist(playlist: Playlist) {
         _library.update { state ->
-            if (state.selected == playlist && state.query.isEmpty()) state
-            else state.copy(selected = playlist, query = "",
-                filtered = filter(state.snapshot, playlist, "", state.sort, state.sortAscending))
+            val (sort, ascending) = LibraryBrowse.sortForPlaylist(playlist, state.sort, state.sortAscending)
+            if (state.selected == playlist && state.query.isEmpty() && state.sort == sort && state.sortAscending == ascending) state
+            else state.copy(
+                selected = playlist,
+                query = "",
+                sort = sort,
+                sortAscending = ascending,
+                filtered = filter(state.snapshot, playlist, "", sort, ascending),
+            )
         }
     }
 
@@ -290,25 +306,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun play(tracks: List<Track>, start: Track? = tracks.firstOrNull(), startPositionMs: Long = 0L, laterKeys: List<String> = emptyList()) {
+    fun play(tracks: List<Track>, start: Track? = tracks.firstOrNull(), startPositionMs: Long = 0L, laterKeys: List<String> = emptyList(), sourceListId: String? = null) {
         if (tracks.isEmpty()) return
         val current = _player.value
         _player.update {
             it.copy(track = start, queue = tracks, error = null, lyrics = null, positionMs = startPositionMs, laterKeys = laterKeys, isPlaying = false, playWhenReady = true, isBuffering = true)
         }
         lyricsForKey = null
-        val pending = PendingPlayback(tracks, start, current.shuffled, current.repeat, startPositionMs, laterKeys)
+        val pending = PendingPlayback(tracks, start, current.shuffled, current.repeat, startPositionMs, laterKeys, sourceListId)
         PlaybackService.pendingPlay.set(pending)
         val service = PlaybackService.service
         if (service != null) {
             PlaybackService.pendingPlay.set(null)
-            service.playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs, pending.laterKeys)
+            service.playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs, pending.laterKeys, pending.sourceListId)
         } else {
             applicationContext.startService(Intent(applicationContext, PlaybackService::class.java))
         }
         bindPlayer()
         persistPlayback(force = true)
         start?.let { loadLyrics(it) }
+        start?.let { track ->
+            safeLaunch(Dispatchers.IO) { container.recentlyPlayed.onTrackStarted(track, sourceListId) }
+        }
     }
 
     fun playLast() {
@@ -393,7 +412,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSort(field: TrackSortField) {
         _library.update { state ->
-            val ascending = if (state.sort == field) !state.sortAscending else true
+            val ascending = if (state.sort == field) !state.sortAscending else TrackSort.defaultAscending(field)
             state.copy(
                 sort = field,
                 sortAscending = ascending,
@@ -1009,12 +1028,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         sort: TrackSortField,
         ascending: Boolean,
     ): List<Track> {
-        val tracks = snapshot.tracksByPlaylist[playlist?.id].orEmpty()
-        val q = query.trim().lowercase()
-        val searched = if (q.isEmpty()) tracks else tracks.filter {
-            it.title.lowercase().contains(q) || it.artist.lowercase().contains(q) || it.album.lowercase().contains(q)
-        }
-        return TrackSort.apply(searched, sort, ascending)
+        return LibraryBrowse.visibleTracks(snapshot, playlist, query, sort, ascending)
     }
 
     private fun message(error: Throwable): String {

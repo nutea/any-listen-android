@@ -41,5 +41,10 @@ class PlayLaterTest {
         val sorted = TrackSort.apply(tracks, TrackSortField.TITLE, false)
         assertEquals(listOf("T4", "T3", "T2", "T1"), sorted.map { it.title })
         assertTrue(TrackSort.apply(tracks, TrackSortField.ARTIST, true).first().artist == "A1")
+        val recency = TrackSort.apply(tracks, TrackSortField.PLAY_TIME, false)
+        assertEquals(tracks.map { it.title }, recency.map { it.title })
+        assertEquals(tracks.reversed().map { it.title }, TrackSort.apply(tracks, TrackSortField.PLAY_TIME, true).map { it.title })
+        assertTrue(TrackSort.defaultAscending(TrackSortField.TITLE))
+        assertTrue(!TrackSort.defaultAscending(TrackSortField.PLAY_TIME))
     }
 }

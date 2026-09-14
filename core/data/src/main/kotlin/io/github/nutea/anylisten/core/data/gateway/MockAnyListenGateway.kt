@@ -1,5 +1,6 @@
 package io.github.nutea.anylisten.core.data.gateway
 
+import io.github.nutea.anylisten.core.model.AddMusicLocationType
 import io.github.nutea.anylisten.core.model.AppError
 import io.github.nutea.anylisten.core.model.DemoCatalog
 import io.github.nutea.anylisten.core.model.ErrorKind
@@ -7,6 +8,10 @@ import io.github.nutea.anylisten.core.model.LibrarySnapshot
 import io.github.nutea.anylisten.core.model.LrcParser
 import io.github.nutea.anylisten.core.model.Lyrics
 import io.github.nutea.anylisten.core.model.MediaResource
+import io.github.nutea.anylisten.core.model.Playlist
+import io.github.nutea.anylisten.core.model.ProtocolConstants
+import io.github.nutea.anylisten.core.model.RecentlyPlayed
+import io.github.nutea.anylisten.core.model.RecentlyPlayedMutation
 import io.github.nutea.anylisten.core.model.Track
 
 class MockAnyListenGateway : AnyListenGateway {
@@ -19,6 +24,8 @@ class MockAnyListenGateway : AnyListenGateway {
     }
 
     override fun isOnline(): Boolean = online
+
+    override fun addMusicLocationType(): AddMusicLocationType = snapshot.addMusicLocationType
 
     override suspend fun refreshLibrary(): LibrarySnapshot {
         if (!online) throw AppError(ErrorKind.NETWORK_UNREACHABLE, "Offline", retryable = true)
@@ -50,5 +57,36 @@ class MockAnyListenGateway : AnyListenGateway {
         snapshot = snapshot.copy(
             tracksByPlaylist = snapshot.tracksByPlaylist + (playlistId to current.filterNot { it.identity == track.identity }),
         )
+    }
+
+    override suspend fun recordRecentlyPlayed(track: Track, sourceListId: String?): List<Track>? {
+        if (!online) return null
+        val current = snapshot.tracksByPlaylist[ProtocolConstants.LIST_LAST_PLAYED].orEmpty()
+        val mutation = RecentlyPlayed.mutation(
+            current.map { it.identity.remoteTrackId },
+            track.identity.remoteTrackId,
+            sourceListId,
+            snapshot.addMusicLocationType,
+        )
+        if (mutation is RecentlyPlayedMutation.None) return null
+        val updated = RecentlyPlayed.apply(current, track, mutation)
+        val playlists = if (snapshot.playlists.any { it.id == ProtocolConstants.LIST_LAST_PLAYED }) {
+            snapshot.playlists.map { playlist ->
+                if (playlist.id == ProtocolConstants.LIST_LAST_PLAYED) playlist.copy(trackCount = updated.size) else playlist
+            }
+        } else {
+            snapshot.playlists + Playlist(
+                ProtocolConstants.LIST_LAST_PLAYED,
+                ProtocolConstants.LIST_LAST_PLAYED,
+                "default",
+                updated.size,
+                canMutateOnline = false,
+            )
+        }
+        snapshot = snapshot.copy(
+            playlists = playlists,
+            tracksByPlaylist = snapshot.tracksByPlaylist + (ProtocolConstants.LIST_LAST_PLAYED to updated),
+        )
+        return updated
     }
 }

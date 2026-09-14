@@ -1,5 +1,6 @@
 package io.github.nutea.anylisten.core.data.gateway
 
+import io.github.nutea.anylisten.core.model.AddMusicLocationType
 import io.github.nutea.anylisten.core.model.LibrarySnapshot
 import io.github.nutea.anylisten.core.model.Lyrics
 import io.github.nutea.anylisten.core.model.MediaResource
@@ -22,5 +23,12 @@ interface AnyListenGateway {
     suspend fun resolveLyrics(track: Track): Lyrics
     suspend fun addToPlaylist(playlistId: String, track: Track)
     suspend fun removeFromPlaylist(playlistId: String, track: Track)
+    /**
+     * Apply the same `last_played` mutations the web-server player runs on `musicChanged`.
+     * Returns the updated last-played tracks, or null when nothing changed or the client is offline.
+     */
+    suspend fun recordRecentlyPlayed(track: Track, sourceListId: String?): List<Track>?
     fun isOnline(): Boolean
+    /** Last known `list.addMusicLocationType`; default `top` like web. */
+    fun addMusicLocationType(): AddMusicLocationType = AddMusicLocationType.TOP
 }

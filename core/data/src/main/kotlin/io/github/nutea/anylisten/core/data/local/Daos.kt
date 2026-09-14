@@ -44,6 +44,12 @@ interface LibraryDao {
     @Query("SELECT * FROM tracks WHERE cacheKey = :cacheKey LIMIT 1")
     suspend fun track(cacheKey: String): TrackEntity?
 
+    @Query("DELETE FROM playlist_entries WHERE playlistId = :playlistId")
+    suspend fun deleteEntries(playlistId: String)
+
+    @Query("UPDATE playlists SET trackCount = :trackCount, refreshedAtEpochMs = :refreshedAtEpochMs WHERE id = :id")
+    suspend fun updatePlaylistCount(id: String, trackCount: Int, refreshedAtEpochMs: Long)
+
     @Query("SELECT MAX(refreshedAtEpochMs) FROM playlists")
     suspend fun lastRefresh(): Long?
 
@@ -69,6 +75,20 @@ interface LibraryDao {
         upsertPlaylists(playlists)
         upsertTracks(tracks)
         upsertEntries(entries)
+    }
+
+    @Transaction
+    suspend fun replacePlaylistTracks(
+        playlistId: String,
+        playlist: PlaylistEntity,
+        tracks: List<TrackEntity>,
+        entries: List<PlaylistEntryEntity>,
+    ) {
+        upsertPlaylists(listOf(playlist))
+        deleteEntries(playlistId)
+        upsertTracks(tracks)
+        upsertEntries(entries)
+        updatePlaylistCount(playlistId, entries.size, playlist.refreshedAtEpochMs)
     }
 }
 

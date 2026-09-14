@@ -37,7 +37,7 @@ UI / ViewModel → Repository → `AnyListenGateway` / Room / 下载协调器。
 |---|---|
 | ServerProfile | 本地 id、baseUrl、实测版本；凭据单独加密保存 |
 | Track | `serverProfileId` + `remoteTrackId` 联合身份；标题 / 艺术家 / 专辑 / 时长；可选指纹 |
-| Playlist | 服务器 ID、名称、刷新时间；`last_played` 不可在线改 |
+| Playlist | 服务器 ID、名称、刷新时间；`last_played` 不可由用户手动改，播放时按 Web 相同规则写入 |
 | PlaylistEntry | 列表、曲目、顺序 |
 | DownloadRecord | 身份、状态、字节、路径、错误、完整性 |
 | PlaybackSnapshot | 本机队列、当前项、位置、播放模式 |

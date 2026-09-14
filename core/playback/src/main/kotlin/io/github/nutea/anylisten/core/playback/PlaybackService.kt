@@ -61,6 +61,7 @@ data class PendingPlayback(
     val repeat: RepeatMode = RepeatMode.ALL,
     val startPositionMs: Long = 0L,
     val laterKeys: List<String> = emptyList(),
+    val sourceListId: String? = null,
 )
 
 class PlaybackService : MediaSessionService() {
@@ -78,6 +79,7 @@ class PlaybackService : MediaSessionService() {
     private var lastPrepareAt = 0L
     private val tracksByKey = ConcurrentHashMap<String, Track>()
     private val laterKeys = linkedSetOf<String>()
+    private var playSourceListId: String? = null
     private var priority: PriorityQueue? = null
     private val favoriteCommand = SessionCommand(COMMAND_FAVORITE, Bundle.EMPTY)
     private val playModeCommand = SessionCommand(COMMAND_PLAY_MODE, Bundle.EMPTY)
@@ -173,6 +175,7 @@ class PlaybackService : MediaSessionService() {
                     refreshSessionButtons()
                     cacheCurrentArtwork()
                     cacheCurrentTrack()
+                    recordRecentlyPlayed(mediaItem?.mediaId)
                 }
 
                 override fun onRepeatModeChanged(repeatMode: Int) {
@@ -245,6 +248,7 @@ class PlaybackService : MediaSessionService() {
         repeat: RepeatMode = RepeatMode.ALL,
         startPositionMs: Long = 0L,
         restoredLaterKeys: List<String> = emptyList(),
+        sourceListId: String? = null,
     ) {
         val exo = player ?: return
         if (Holder.resolver == null) return
@@ -252,6 +256,7 @@ class PlaybackService : MediaSessionService() {
         playJob = scope.launch {
             tracksByKey.clear()
             laterKeys.clear()
+            playSourceListId = sourceListId
             tracks.forEach { tracksByKey[it.cacheKey] = it }
             if (tracks.isEmpty()) return@launch
             val startIndex = tracks.indexOfFirst { it.identity == start?.identity }.coerceAtLeast(0)
@@ -596,7 +601,25 @@ class PlaybackService : MediaSessionService() {
 
     private fun consumePending() {
         val pending = pendingPlay.getAndSet(null) ?: return
-        playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs, pending.laterKeys)
+        playTracks(
+            pending.tracks,
+            pending.start,
+            pending.shuffled,
+            pending.repeat,
+            pending.startPositionMs,
+            pending.laterKeys,
+            pending.sourceListId,
+        )
+    }
+
+    private fun recordRecentlyPlayed(cacheKey: String?) {
+        val track = cacheKey?.let { tracksByKey[it] } ?: return
+        val sourceListId = playSourceListId
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                (application as ContainerHolder).container.recentlyPlayed.onTrackStarted(track, sourceListId)
+            }
+        }
     }
 
     private inner class SessionCallback : MediaSession.Callback {
