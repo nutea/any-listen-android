@@ -14,7 +14,7 @@ class NetworkFactoryTest {
     @Test
     fun clientPingsWebSocketsSoHalfOpenLinksFail() {
         val client = NetworkFactory.client()
-        assertEquals(NetworkFactory.WEBSOCKET_PING_INTERVAL_MS, client.pingIntervalMillis)
+        assertEquals(NetworkFactory.WEBSOCKET_PING_INTERVAL_MS, client.pingIntervalMillis.toLong())
         assertTrue(client.retryOnConnectionFailure)
     }
 

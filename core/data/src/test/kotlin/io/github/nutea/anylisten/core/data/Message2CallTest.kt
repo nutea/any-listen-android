@@ -6,6 +6,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
@@ -47,9 +48,10 @@ class Message2CallTest {
         assertEquals("send failed", error?.message)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun unansweredCallTimesOutInsteadOfHanging() = runTest {
-        val client = Message2Call(ProtocolDtos.json, { }, callTimeoutMs = 1_000)
+        val client = Message2Call(ProtocolDtos.json, callTimeoutMs = 1_000) { }
         val result = async { runCatching { client.call(listOf("getMusicUrl")) } }
         advanceTimeBy(1_000)
         assertTrue(result.await().isFailure)

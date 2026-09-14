@@ -26,8 +26,8 @@ import kotlinx.coroutines.withTimeout
  */
 class Message2Call(
     private val json: Json,
-    private val send: (String) -> Unit,
     private val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
+    private val send: (String) -> Unit,
 ) {
     private val pending = ConcurrentHashMap<String, Continuation<JsonElement?>>()
 
