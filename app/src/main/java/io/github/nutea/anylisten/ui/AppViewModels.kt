@@ -201,6 +201,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _player.update { state -> state.copy(
                     track = state.track?.let(::updatedCover), queue = state.queue.map(::updatedCover),
                     lyrics = if (state.track?.cacheKey == track?.cacheKey) lyrics else state.lyrics,
+                    availableOffline = state.track?.let { isAvailableOffline(it) } == true,
                 ) }
                 rebuildLocalInventory(_downloads.value, _library.value.snapshot)
             }

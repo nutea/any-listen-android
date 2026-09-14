@@ -116,15 +116,10 @@ class PlaybackService : MediaSessionService() {
             val token = container.offlineAssets.streamToken()
             StreamingCacheDataSource(
                 if (automaticAudioCaching) cacheFactory.createDataSource() else readOnlyCacheFactory.createDataSource(),
-                File(cacheDir, "recording"), { automaticAudioCaching },
-            ) { spec, file ->
-                val track = spec.customData as? Track
-                if (track == null) file.delete() else {
-                    val save = scope.launch(Dispatchers.IO) {
-                        runCatching { container.offlineAssets.adoptStream(track, spec.uri.toString(), file, token) }
-                    }
-                    save.invokeOnCompletion { file.delete() }
-                }
+                { automaticAudioCaching },
+            ) { spec, openedLength ->
+                val track = spec.customData as? Track ?: return@StreamingCacheDataSource null
+                container.offlineAssets.openStreamSink(track, spec.uri.toString(), spec.position, openedLength, token)
             }
         }
         val resolvingFactory = ResolvingDataSource.Factory(playbackDataSource) { spec ->
