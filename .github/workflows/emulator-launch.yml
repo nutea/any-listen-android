@@ -1,0 +1,109 @@
+name: Emulator launch
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Unit tests and lint
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :core:model:test :core:data:testDebugUnitTest :app:lintDebug
+
+  assemble:
+    name: assemble minified release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Assemble minified release
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  repro-beta2:
+    name: beta.2 crash logcat
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Make launch script executable
+        run: chmod +x .github/scripts/emulator-launch.sh
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: aosp_atd
+          arch: x86_64
+          force-avd-creation: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: .github/scripts/emulator-launch.sh repro
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beta2-logcat
+          path: beta2-logcat.txt
+          if-no-files-found: warn
+
+  verify-fix:
+    name: minified release stays up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Assemble minified release
+        run: |
+          chmod +x gradlew
+          chmod +x .github/scripts/emulator-launch.sh
+          ./gradlew --no-daemon :app:assembleRelease
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: aosp_atd
+          arch: x86_64
+          force-avd-creation: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: .github/scripts/emulator-launch.sh verify
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fixed-logcat
+          path: fixed-logcat.txt
+          if-no-files-found: warn

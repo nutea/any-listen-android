@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.nutea.anylisten"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.1-beta.2"
+        versionCode = 6
+        versionName = "0.1.1-beta.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -45,7 +45,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfigs.findByName("release")?.let { signingConfig = it }
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

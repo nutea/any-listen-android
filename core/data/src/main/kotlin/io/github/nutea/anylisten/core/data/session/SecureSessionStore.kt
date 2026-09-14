@@ -1,12 +1,17 @@
+@file:Suppress("DEPRECATION")
+
 package io.github.nutea.anylisten.core.data.session
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.github.nutea.anylisten.core.model.ServerProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.security.KeyStore
 
 data class StoredSession(
     val profile: ServerProfile,
@@ -21,13 +26,8 @@ interface SessionStore {
 }
 
 class SecureSessionStore(context: Context) : SessionStore {
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "session",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val app = context.applicationContext
+    private val prefs = openSessionPreferences(app)
     private val state = MutableStateFlow(read())
     val session: StateFlow<StoredSession?> = state.asStateFlow()
 
@@ -49,6 +49,9 @@ class SecureSessionStore(context: Context) : SessionStore {
 
     override fun clear() {
         prefs.edit().clear().commit()
+        // Logout must also drop leftover plaintext so a later Keystore
+        // failure cannot restore a session the user already ended.
+        discardFallbackSessionStore(app)
         state.value = null
     }
 
@@ -78,3 +81,82 @@ class SecureSessionStore(context: Context) : SessionStore {
         const val KEY_PASSWORD = "password"
     }
 }
+
+internal const val SESSION_PREFS_NAME = "session"
+internal const val SESSION_FALLBACK_PREFS_NAME = "session_fallback"
+
+/**
+ * EncryptedSharedPreferences / Android Keystore can throw on first launch or after a
+ * corrupted keyset. Application.onCreate must not die because of that.
+ */
+internal fun openSessionPreferences(context: Context): SharedPreferences {
+    val app = context.applicationContext
+    return openWithRecovery(
+        create = {
+            encryptedSessionPreferences(app).also {
+                discardFallbackSessionStore(app)
+            }
+        },
+        wipe = { wipeEncryptedSession(app) },
+        fallback = {
+            Log.e(SESSION_STORE_TAG, "Encrypted session prefs unavailable; using private fallback")
+            app.getSharedPreferences(SESSION_FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
+        },
+        onFirstFailure = { Log.e(SESSION_STORE_TAG, "Encrypted session prefs failed; wiping and retrying", it) },
+        onRetryFailure = { Log.e(SESSION_STORE_TAG, "Encrypted session prefs retry failed", it) },
+    )
+}
+
+internal fun discardFallbackSessionStore(context: Context) {
+    context.getSharedPreferences(SESSION_FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .clear()
+        .commit()
+    context.deleteSharedPreferences(SESSION_FALLBACK_PREFS_NAME)
+}
+
+internal fun <T> openWithRecovery(
+    create: () -> T,
+    wipe: () -> Unit,
+    fallback: () -> T,
+    onFirstFailure: (Throwable) -> Unit = {},
+    onRetryFailure: (Throwable) -> Unit = {},
+): T = try {
+    create()
+} catch (first: Throwable) {
+    onFirstFailure(first)
+    runCatching(wipe)
+    try {
+        create()
+    } catch (second: Throwable) {
+        onRetryFailure(second)
+        fallback()
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun encryptedSessionPreferences(context: Context): SharedPreferences {
+    val master = MasterKey.Builder(context)
+        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+        .build()
+    return EncryptedSharedPreferences.create(
+        context,
+        SESSION_PREFS_NAME,
+        master,
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
+}
+
+@Suppress("DEPRECATION")
+private fun wipeEncryptedSession(context: Context) {
+    context.deleteSharedPreferences(SESSION_PREFS_NAME)
+    runCatching {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (keyStore.containsAlias(MasterKey.DEFAULT_MASTER_KEY_ALIAS)) {
+            keyStore.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+        }
+    }
+}
+
+private const val SESSION_STORE_TAG = "SecureSessionStore"
