@@ -98,9 +98,18 @@ keyPassword=...
 ## 测试版 v0.1.1-beta.4
 
 - versionName: 0.1.1-beta.4；versionCode: 7；正式包名不变。
+- 撤回 beta.3 无效的 SecureSessionStore hardening；修复登录/恢复成功后误拆 IPC 导致的闪退。见 [RELEASE_NOTES_0.1.1-beta.4.md](RELEASE_NOTES_0.1.1-beta.4.md)。
+- 不要移动或重打 `v0.1.1-beta.3` 标签。未轮换签名密钥。
+
 ## 测试版 v0.1.1-beta.5
 
 - versionName: 0.1.1-beta.5；versionCode: 8；正式包名不变。
 - 重构服务器连接 / 会话 / 重连：单一 `SessionConnectionManager`、稳定网络身份、IPC 完成幂等。针对「播放未缓存歌曲时切换网络闪退」。见 [RELEASE_NOTES_0.1.1-beta.5.md](RELEASE_NOTES_0.1.1-beta.5.md)。
 - 不要移动或重打 `v0.1.1-beta.4` 标签。未轮换签名密钥。
 - 保留 beta.1 网络重连修复与 CI 标签签名。不要轮换上传密钥。
+
+## 正式版 v0.1.2
+
+- versionName: 0.1.2；versionCode: 9；正式包名不变。版本名不含 beta / rc / alpha。
+- 相对 v0.1.0：纳入网络重连（PR #1 一脉）、CI 标签签名（beta.2）、连接 / 会话重构（PR #7 / beta.5）。beta.3 的 SecureSessionStore hardening 已在 beta.4 撤回。登录闪退与播放未缓存歌曲时切换网络闪退均已修复。见 [RELEASE_NOTES_0.1.2.md](RELEASE_NOTES_0.1.2.md)。
+- 合并后由协调者打标签 `v0.1.2`，现有 CI 签名并发布正式 Release（非 Pre-release）。不要在本变更中打标签，也不要移动或重打既有测试版标签。未轮换签名密钥。
