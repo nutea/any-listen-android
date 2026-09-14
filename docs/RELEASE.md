@@ -44,3 +44,11 @@
 - 依赖清单：`./gradlew :app:writeReleaseDependencies --no-configuration-cache`，随后 `python tools/release/collect_licenses.py`。
 - 源码提交和 CI 通过后创建 v0.1.0 标签；通过 GitHub Release 分发正式 APK、对应 git archive 源码、LICENSE/NOTICE/third_party 许可包与 SHA256SUMS.txt。使用草稿上传，检查附件齐全后发布。
 - 调试版与正式版包名不同，数据不会自动迁移。发布正文见 RELEASE_NOTES_0.1.0.md。
+
+## 测试版 v0.1.1-beta.1
+
+- versionName: 0.1.1-beta.1；versionCode: 4；正式包名不变。
+- 聚焦网络切换后的断连、卡住加载与「音频不可用」恢复，见 [RELEASE_NOTES_0.1.1-beta.1.md](RELEASE_NOTES_0.1.1-beta.1.md)。
+- 继续使用 v0.1.0 的上传密钥，不重新生成或更换，以保证覆盖安装。
+- 兼容服务端仍为 Any Listen Web Server `0.11.0-beta.1`。
+- 若发布环境没有 `keystore.properties`，GitHub Pre-release 只附源码与许可包，并在正文标明签名 APK 待本地 `./gradlew assembleRelease`；预期 APK 名为 `any-listen-android-0.1.1-beta.1.apk`。

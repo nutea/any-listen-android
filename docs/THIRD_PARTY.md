@@ -37,7 +37,7 @@
 
 ## 首版运行时清单
 
-[v0.1.0 运行时依赖清单](../third_party/runtime/README.md)记录正式构建实际解析的 111 个外部坐标、POM 声明及依赖内附带的许可/通知。完整 Apache-2.0 和 Google Protobuf BSD-3-Clause 文本一并保留。生成入口为 `:app:writeReleaseDependencies` 和 `tools/release/collect_licenses.py`。
+[v0.1.0 运行时依赖清单](../third_party/runtime/README.md)记录正式构建实际解析的 111 个外部坐标、POM 声明及依赖内附带的许可/通知。完整 Apache-2.0 和 Google Protobuf BSD-3-Clause 文本一并保留。生成入口为 `:app:writeReleaseDependencies` 和 `tools/release/collect_licenses.py`。v0.1.1-beta.1 未变更这些运行时坐标，发布许可包沿用该清单。
 
 ## 分发说明
 

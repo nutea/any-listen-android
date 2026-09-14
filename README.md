@@ -35,7 +35,7 @@
 ## 开始使用
 
 1. 准备 **Android 8.0 及以上**的手机，部署 Any Listen 服务，并在服务端添加自己的本地音乐文件。
-2. 从 [Releases](https://github.com/nutea/any-listen-android/releases/latest) 下载并安装 APK，填写手机可访问的 HTTPS 服务器地址和访问凭据。
+2. 从 [Releases](https://github.com/nutea/any-listen-android/releases) 下载并安装 APK，填写手机可访问的 HTTPS 服务器地址和访问凭据。GitHub 的 Latest 指向最新正式版（当前为 v0.1.0）；测试版（如 v0.1.1-beta.1 网络重连修复）会单独标记为 Pre-release。
 3. 同步音乐库后即可播放；提前下载歌曲，可在断网时继续收听。
 
 当前适配 **Any Listen Web Server v0.11.0-beta.1**，其他版本的兼容性以实际测试为准。更多操作见[使用说明](docs/USER_GUIDE.md)。
