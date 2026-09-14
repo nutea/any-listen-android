@@ -6,6 +6,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
@@ -55,5 +56,40 @@ class Message2CallTest {
         val result = async { runCatching { client.call(listOf("getMusicUrl")) } }
         advanceTimeBy(1_000)
         assertTrue(result.await().isFailure)
+    }
+
+    @Test
+    fun destroyWithMultiplePendingDoesNotThrow() = runBlocking {
+        val client = Message2Call(ProtocolDtos.json) { }
+        coroutineScope {
+            val first = async { runCatching { client.call(listOf("a")) } }
+            val second = async { runCatching { client.call(listOf("b")) } }
+            yield()
+            client.destroy("closed")
+            assertTrue(first.await().isFailure)
+            assertTrue(second.await().isFailure)
+        }
+    }
+
+    @Test
+    fun destroyRacingOnMessageDoesNotThrow() = runBlocking {
+        val sent = CompletableDeferred<String>()
+        val client = Message2Call(ProtocolDtos.json) { sent.complete(it) }
+        coroutineScope {
+            val job = async { runCatching { client.call(listOf("getAllUserLists")) } }
+            val request = ProtocolDtos.json.parseToJsonElement(sent.await()) as JsonArray
+            val name = request[1].jsonPrimitive.content
+            val response = buildJsonArray {
+                add(JsonPrimitive(1))
+                add(JsonPrimitive(name))
+                add(JsonNull)
+                add(JsonPrimitive("ok"))
+            }
+            repeat(20) {
+                client.onMessage(response.toString())
+                client.destroy("closed")
+            }
+            job.await()
+        }
     }
 }

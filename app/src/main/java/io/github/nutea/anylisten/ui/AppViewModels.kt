@@ -48,6 +48,7 @@ import io.github.nutea.anylisten.core.model.ThemeMode
 import io.github.nutea.anylisten.ui.screens.LocalBatchAction
 import io.github.nutea.anylisten.core.model.TrackIdentity
 import io.github.nutea.anylisten.core.playback.PendingPlayback
+import io.github.nutea.anylisten.core.playback.PlaybackReconnect
 import io.github.nutea.anylisten.core.playback.PlaybackService
 import io.github.nutea.anylisten.core.playback.removeQueuedTrack
 import kotlinx.coroutines.Dispatchers
@@ -948,13 +949,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val cm = applicationContext.getSystemService(ConnectivityManager::class.java) ?: return
         val callback = object : ConnectivityManager.NetworkCallback() {
             private var availableNetwork: Network? = null
+            private var observedDefaultNetwork = false
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                 val usable = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                     caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 if (usable) {
                     if (availableNetwork != network) {
+                        val networkChanged = observedDefaultNetwork
                         availableNetwork = network
-                        onNetworkUsable()
+                        observedDefaultNetwork = true
+                        if (PlaybackReconnect.shouldRebuildSession(container.gateway.isOnline(), networkChanged)) {
+                            onNetworkUsable()
+                        } else {
+                            resumeDownloads()
+                        }
                     }
                 } else if (availableNetwork == network) availableNetwork = null
             }
@@ -973,7 +981,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun onNetworkUsable() {
         viewModelScope.launch {
             container.dropStaleConnections()
-            runCatching { container.session.restore() }
+            runCatching { withContext(Dispatchers.IO) { container.session.restore() } }
             PlaybackService.service?.recoverConnection()
             resumeDownloads()
         }

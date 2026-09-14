@@ -13,9 +13,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 
@@ -29,7 +29,7 @@ class Message2Call(
     private val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
     private val send: (String) -> Unit,
 ) {
-    private val pending = ConcurrentHashMap<String, Continuation<JsonElement?>>()
+    private val pending = ConcurrentHashMap<String, CancellableContinuation<JsonElement?>>()
 
     suspend fun call(pathname: List<String>, args: List<JsonElement> = emptyList()): JsonElement? =
         withTimeout(callTimeoutMs) {
@@ -48,32 +48,38 @@ class Message2Call(
                     send(frame.toString())
                 } catch (error: Throwable) {
                     pending.remove(name)
-                    if (cont.isActive) cont.resumeWithException(error)
+                    resumeOnce(cont) { resumeWithException(error) }
                 }
             }
         }
 
     fun onMessage(raw: String) {
         if (raw == "ping") return
-        val element = json.parseToJsonElement(raw)
-        if (element !is JsonArray || element.isEmpty()) return
-        val type = element[0].jsonPrimitive.content.toIntOrNull() ?: return
-        if (type != 1 || element.size < 3) return
-        val name = element[1].jsonPrimitive.content
-        val cont = pending.remove(name) ?: return
-        val err = element[2]
-        if (err is JsonNull) {
-            cont.resume(element.getOrNull(3))
-        } else {
-            val message = err.jsonObject["message"]?.jsonPrimitive?.contentOrNull ?: "IPC error"
-            cont.resumeWithException(IllegalStateException(message))
+        try {
+            val element = json.parseToJsonElement(raw)
+            if (element !is JsonArray || element.isEmpty()) return
+            val type = element[0].jsonPrimitive.content.toIntOrNull() ?: return
+            if (type != 1 || element.size < 3) return
+            val name = element[1].jsonPrimitive.content
+            val cont = pending.remove(name) ?: return
+            val err = element[2]
+            if (err is JsonNull) {
+                resumeOnce(cont) { resume(element.getOrNull(3)) }
+            } else {
+                val message = err.jsonObject["message"]?.jsonPrimitive?.contentOrNull ?: "IPC error"
+                resumeOnce(cont) { resumeWithException(IllegalStateException(message)) }
+            }
+        } catch (_: Throwable) {
+            // Never let a bad frame or a double-resume kill the WebSocket thread.
         }
     }
 
     fun destroy(message: String = "disconnected") {
-        val error = IllegalStateException(message)
-        pending.values.forEach { it.resumeWithException(error) }
+        val waiting = pending.values.toList()
         pending.clear()
+        waiting.forEach { cont ->
+            resumeOnce(cont) { resumeWithException(IllegalStateException(message)) }
+        }
     }
 
     companion object {
@@ -82,5 +88,13 @@ class Message2Call(
         fun obj(vararg pairs: Pair<String, JsonElement?>): JsonObject = JsonObject(
             pairs.mapNotNull { (k, v) -> v?.let { k to it } }.toMap(),
         )
+
+        private fun resumeOnce(
+            cont: CancellableContinuation<JsonElement?>,
+            resume: CancellableContinuation<JsonElement?>.() -> Unit,
+        ) {
+            if (!cont.isActive) return
+            runCatching { cont.resume() }
+        }
     }
 }

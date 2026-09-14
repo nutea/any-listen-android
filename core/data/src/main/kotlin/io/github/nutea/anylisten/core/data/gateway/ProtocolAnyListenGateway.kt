@@ -252,6 +252,7 @@ class ProtocolAnyListenGateway(
                     }
                 },
             )
+            socket = ws
             cont.invokeOnCancellation { ws.cancel() }
         }
         runCatching { client.call(listOf("inited")) }

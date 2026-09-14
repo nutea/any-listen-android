@@ -25,4 +25,16 @@ object PlaybackReconnect {
         if (!stillBuffering || !playWhenReady) return false
         return !gatewayOnline || msSinceNetworkChange in 0 until NETWORK_CHANGE_WINDOW_MS
     }
+
+    /**
+     * Tear down and rebuild the IPC session only when the socket is already dead,
+     * or after a real default-network change (half-open link). The first
+     * ConnectivityManager callback after login/restore must not reconnect —
+     * that races Message2Call destroy/onMessage on a healthy socket and can
+     * kill the process right after a successful connect.
+     */
+    fun shouldRebuildSession(gatewayOnline: Boolean, networkChanged: Boolean): Boolean {
+        if (!gatewayOnline) return true
+        return networkChanged
+    }
 }

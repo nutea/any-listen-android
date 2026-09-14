@@ -308,6 +308,7 @@ class PlaybackService : MediaSessionService() {
         val cm = getSystemService(ConnectivityManager::class.java)
         val callback = object : ConnectivityManager.NetworkCallback() {
             private var usable: Network? = null
+            private var observedDefaultNetwork = false
             override fun onLost(network: Network) {
                 if (usable != network) return
                 usable = null
@@ -325,9 +326,14 @@ class PlaybackService : MediaSessionService() {
                     return
                 }
                 if (usable == network) return
+                val networkChanged = observedDefaultNetwork
                 usable = network
+                observedDefaultNetwork = true
                 lastNetworkChangeAt = SystemClock.elapsedRealtime()
-                scope.launch { recoverConnection() }
+                val container = (application as ContainerHolder).container
+                if (PlaybackReconnect.shouldRebuildSession(container.gateway.isOnline(), networkChanged)) {
+                    scope.launch { recoverConnection() }
+                }
             }
         }
         networkCallback = callback
@@ -384,7 +390,9 @@ class PlaybackService : MediaSessionService() {
                 }
                 delay(500L)
                 val restored = try {
-                    withTimeoutOrNull(30_000L) { container.session.restore() }
+                    withContext(Dispatchers.IO) {
+                        withTimeoutOrNull(30_000L) { container.session.restore() }
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) { null }
