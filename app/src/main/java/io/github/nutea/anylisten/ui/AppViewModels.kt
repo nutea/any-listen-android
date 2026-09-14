@@ -949,19 +949,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val callback = object : ConnectivityManager.NetworkCallback() {
             private var availableNetwork: Network? = null
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                val usable = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                if (usable) {
                     if (availableNetwork != network) {
                         availableNetwork = network
-                        resumeDownloads()
+                        onNetworkUsable()
                     }
                 } else if (availableNetwork == network) availableNetwork = null
             }
             override fun onLost(network: Network) {
-                if (availableNetwork == network) availableNetwork = null
+                if (availableNetwork == network) {
+                    availableNetwork = null
+                    container.dropStaleConnections()
+                    container.cancelInFlightCalls()
+                }
             }
         }
         networkCallback = callback
         runCatching { cm.registerDefaultNetworkCallback(callback) }
+    }
+
+    private fun onNetworkUsable() {
+        viewModelScope.launch {
+            container.dropStaleConnections()
+            runCatching { container.session.restore() }
+            PlaybackService.service?.recoverConnection()
+            resumeDownloads()
+        }
     }
 
     suspend fun refreshStorage() {

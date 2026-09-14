@@ -21,6 +21,8 @@ class AppContainer(context: Context) {
     private val maintenance = PlaybackMaintenance()
     fun setPlaybackActive(active: Boolean) { maintenance.setActive(active) }
     val http = NetworkFactory.client()
+    fun dropStaleConnections() = http.dropStaleConnections()
+    fun cancelInFlightCalls() = http.cancelInFlightCalls()
     val db = AppDatabase.create(appContext)
     val sessionStore = SecureSessionStore(appContext)
     val settings = AppSettingsStore(appContext)

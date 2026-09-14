@@ -8,12 +8,16 @@ import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
 object NetworkFactory {
+    const val WEBSOCKET_PING_INTERVAL_MS = 20_000L
+
     fun client(): OkHttpClient {
         val jar = MemoryCookieJar()
         return OkHttpClient.Builder()
             .cookieJar(jar)
             .followRedirects(true)
             .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .pingInterval(Duration.ofMillis(WEBSOCKET_PING_INTERVAL_MS))
             .callTimeout(Duration.ofSeconds(45))
             .connectTimeout(Duration.ofSeconds(15))
             .readTimeout(Duration.ofSeconds(45))
@@ -29,6 +33,16 @@ object NetworkFactory {
             }
             .build()
     }
+}
+
+/** Drop keep-alives bound to a dead interface. Does not cancel in-flight restore/auth calls. */
+fun OkHttpClient.dropStaleConnections() {
+    connectionPool.evictAll()
+}
+
+/** Fail requests still trying the old interface after the default network is lost. */
+fun OkHttpClient.cancelInFlightCalls() {
+    dispatcher.cancelAll()
 }
 
 class MemoryCookieJar : CookieJar {
