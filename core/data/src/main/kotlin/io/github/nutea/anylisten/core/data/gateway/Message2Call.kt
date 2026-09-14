@@ -17,6 +17,7 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 
 /**
  * Subset of message2call v2 frames used by Any Listen IPC.
@@ -25,23 +26,31 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  */
 class Message2Call(
     private val json: Json,
+    private val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
     private val send: (String) -> Unit,
 ) {
     private val pending = ConcurrentHashMap<String, Continuation<JsonElement?>>()
 
     suspend fun call(pathname: List<String>, args: List<JsonElement> = emptyList()): JsonElement? =
-        suspendCancellableCoroutine { cont ->
-            val name = pathname.joinToString(".") + "_" + UUID.randomUUID().toString().replace("-", "").take(12)
-            pending[name] = cont
-            cont.invokeOnCancellation { pending.remove(name) }
-            val frame = buildJsonArray {
-                add(JsonPrimitive(0))
-                add(JsonPrimitive(name))
-                add(buildJsonArray { pathname.forEach { add(JsonPrimitive(it)) } })
-                add(buildJsonArray { args.forEach { add(it) } })
-                add(buildJsonArray { })
+        withTimeout(callTimeoutMs) {
+            suspendCancellableCoroutine { cont ->
+                val name = pathname.joinToString(".") + "_" + UUID.randomUUID().toString().replace("-", "").take(12)
+                pending[name] = cont
+                cont.invokeOnCancellation { pending.remove(name) }
+                val frame = buildJsonArray {
+                    add(JsonPrimitive(0))
+                    add(JsonPrimitive(name))
+                    add(buildJsonArray { pathname.forEach { add(JsonPrimitive(it)) } })
+                    add(buildJsonArray { args.forEach { add(it) } })
+                    add(buildJsonArray { })
+                }
+                try {
+                    send(frame.toString())
+                } catch (error: Throwable) {
+                    pending.remove(name)
+                    if (cont.isActive) cont.resumeWithException(error)
+                }
             }
-            send(frame.toString())
         }
 
     fun onMessage(raw: String) {
@@ -68,6 +77,8 @@ class Message2Call(
     }
 
     companion object {
+        const val DEFAULT_CALL_TIMEOUT_MS = 20_000L
+
         fun obj(vararg pairs: Pair<String, JsonElement?>): JsonObject = JsonObject(
             pairs.mapNotNull { (k, v) -> v?.let { k to it } }.toMap(),
         )

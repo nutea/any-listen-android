@@ -17,6 +17,9 @@ android {
         jvmTarget = "17"
         freeCompilerArgs += "-opt-in=androidx.media3.common.util.UnstableApi"
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -32,4 +35,5 @@ dependencies {
     implementation(libs.media3.datasource)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)
+    testImplementation(libs.junit)
 }

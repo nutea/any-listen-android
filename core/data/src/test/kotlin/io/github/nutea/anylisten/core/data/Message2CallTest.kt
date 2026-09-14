@@ -6,12 +6,16 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Message2CallTest {
@@ -34,5 +38,22 @@ class Message2CallTest {
             client.onMessage(response.toString())
             assertEquals("ok", job.await()?.jsonPrimitive?.content)
         }
+    }
+
+    @Test
+    fun failedSendFailsTheCallImmediately() = runBlocking {
+        val client = Message2Call(ProtocolDtos.json) { error("send failed") }
+        val error = runCatching { client.call(listOf("getMusicUrl")) }.exceptionOrNull()
+        assertTrue(error is IllegalStateException)
+        assertEquals("send failed", error?.message)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun unansweredCallTimesOutInsteadOfHanging() = runTest {
+        val client = Message2Call(ProtocolDtos.json, callTimeoutMs = 1_000) { }
+        val result = async { runCatching { client.call(listOf("getMusicUrl")) } }
+        advanceTimeBy(1_000)
+        assertTrue(result.await().isFailure)
     }
 }

@@ -69,7 +69,7 @@ class ProtocolAnyListenGateway(
 
     override suspend fun refreshLibrary(): LibrarySnapshot {
         val profile = session?.profile ?: throw AppError(ErrorKind.SESSION_EXPIRED, "Not signed in")
-        val call = ipc ?: throw AppError(ErrorKind.NETWORK_UNREACHABLE, "Socket not connected", retryable = true)
+        val call = requireIpc()
         val listsEl = call.call(listOf("getAllUserLists"))
         val playlists = ProtocolDtos.playlistsFrom(listsEl?.jsonObject ?: JsonObject(emptyMap()))
         val tracks = linkedMapOf<String, List<Track>>()
@@ -194,8 +194,13 @@ class ProtocolAnyListenGateway(
         return musics?.jsonArray?.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }.orEmpty()
     }
 
-    private fun requireIpc(): Message2Call =
-        ipc ?: throw AppError(ErrorKind.NETWORK_UNREACHABLE, "Socket not connected", retryable = true)
+    private fun requireIpc(): Message2Call {
+        val call = ipc
+        if (call == null || !connected.get()) {
+            throw AppError(ErrorKind.NETWORK_UNREACHABLE, "Socket not connected", retryable = true)
+        }
+        return call
+    }
 
     private fun resolvePublicUrl(raw: String?): String? {
         val value = raw?.trim().orEmpty()
@@ -210,7 +215,12 @@ class ProtocolAnyListenGateway(
             info.profile.baseUrl,
             "${ProtocolConstants.SOCKET_PATH}?m=$token&t=${ProtocolConstants.WIN_TYPE_MAIN}",
         )
-        val client = Message2Call(ProtocolDtos.json) { text -> socket?.send(text) }
+        val client = Message2Call(ProtocolDtos.json) { text ->
+            val ws = socket
+            if (ws == null || !ws.send(text)) {
+                throw java.io.IOException("WebSocket send failed")
+            }
+        }
         ipc = client
         val request = Request.Builder().url(wsUrl).build()
         socket = suspendCancellableCoroutine { cont ->
@@ -227,8 +237,7 @@ class ProtocolAnyListenGateway(
                     }
 
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        if (ipc === client) connected.set(false)
-                        client.destroy(t.message ?: "socket failed")
+                        markSocketDead(client, t.message ?: "socket failed")
                         if (cont.isActive) {
                             val code = response?.code
                             cont.resumeWithException(
@@ -239,8 +248,7 @@ class ProtocolAnyListenGateway(
                     }
 
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                        if (ipc === client) connected.set(false)
-                        client.destroy("closed")
+                        markSocketDead(client, "closed")
                     }
                 },
             )
@@ -261,6 +269,15 @@ class ProtocolAnyListenGateway(
                 .build()
             http.newCall(tokenReq).execute().close()
         }
+    }
+
+    private fun markSocketDead(client: Message2Call, message: String) {
+        if (ipc === client) {
+            connected.set(false)
+            ipc = null
+            socket = null
+        }
+        client.destroy(message)
     }
 
     private fun disconnectLocked() {
