@@ -76,7 +76,7 @@ RESPONSE = [1, eventName, null, result] | [1, eventName, {message, stack?}]
 | `getListMusics` | `listId` | `MusicInfo[]` | 列表曲目（全量，无游标） |
 | `getMusicUrl` | `{ musicInfo, isRefresh?, quality? }` | `{ url, quality, isFromCache }` | 播放/下载 |
 | `getMusicPic` | `{ musicInfo, isRefresh? }` | `{ url, isFromCache }` | 封面 |
-| `getMusicLyric` | `{ musicInfo, isRefresh? }` | `{ info: { lyric, awlyric?, tlyric?, ... }, isFromCache }` | 基础 LRC |
+| `getMusicLyric` | `{ musicInfo, isRefresh? }` | `{ info: { lyric, awlyric?, tlyric?, ... }, isFromCache }` | 基础 LRC。网页播放只传 `musicInfo`。`isRefresh=true` 会跳过已编辑歌词和本地文件歌词。本客户端播放路径同样省略 `isRefresh`，用服务端 DB/文件结果与本地 sidecar 文本哈希比较。 |
 | `getSetting` | 无 | 扁平 `AppSetting`（键如 `list.addMusicLocationType`） | 最近播放插入位置，默认 `top` |
 | `listAction` | `{ action, data }` | void | 收藏/增删；最近播放另用 `list_music_update_position` |
 | `checkListExistMusic` | `listId, musicId` | boolean | 写后确认 |
