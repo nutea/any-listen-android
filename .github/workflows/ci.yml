@@ -24,6 +24,8 @@ jobs:
         run: python -m py_compile tools/probe/probe.py
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Unit tests and lint
         run: |
           chmod +x gradlew
@@ -52,7 +54,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: "tools platform-tools build-tools;36.0.0 platforms;android-36"
+          packages: "platform-tools build-tools;36.0.0 platforms;android-36"
       - name: Require Android signing secrets
         run: |
           set +x
