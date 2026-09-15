@@ -31,6 +31,7 @@ class OfflineAssets(
     private val gateway: AnyListenGateway,
     private val downloader: FileDownloader,
     private val artwork: ArtworkStore,
+    private val now: () -> Long = { System.currentTimeMillis() },
     private val baseUrl: () -> String,
 ) {
     private val changes = MutableStateFlow(0L)
@@ -189,22 +190,37 @@ class OfflineAssets(
 
     suspend fun lyrics(track: Track, force: Boolean = false): Lyrics = withContext(Dispatchers.IO) {
         val saved = cachedLyrics(track)
-        if (saved != null && !force) {
-            if (gateway.isOnline()) synchronized(lyricJobs) {
-                if (lyricJobs[track.cacheKey]?.isActive != true) lyricJobs[track.cacheKey] = scope.launch { attempt { refreshLyrics(track,false) } }
-            }
-            return@withContext saved
+        val absent = file(track.cacheKey, ".lrc.none").isFile
+        if (!force && gateway.isOnline() && (saved != null || absent)) {
+            scheduleLyricRevalidate(track)
+            return@withContext saved ?: Lyrics(emptyList(), "")
         }
         if (!gateway.isOnline() && saved != null) return@withContext saved
-        if (!gateway.isOnline() && file(track.cacheKey,".lrc.none").isFile) return@withContext Lyrics(emptyList(),"")
-        refreshLyrics(track,force)
+        if (!gateway.isOnline() && absent) return@withContext Lyrics(emptyList(),"")
+        refreshLyrics(track, force, skipTtl = false)
     }
 
-    private suspend fun refreshLyrics(track: Track, force: Boolean): Lyrics = lock(lyricLocks,track.cacheKey).withLock {
+    /**
+     * Web playback calls getMusicLyric on every track change and omits isRefresh.
+     * Show the sidecar immediately and refresh in the background; only coalesce
+     * the duplicate player + cachePlayed calls that share one play start.
+     */
+    private fun scheduleLyricRevalidate(track: Track) {
+        synchronized(lyricJobs) {
+            lyricJobs[track.cacheKey]?.takeIf { it.isActive }?.let { return }
+            val job = scope.launch { attempt { refreshLyrics(track, force = false, skipTtl = true) } }
+            lyricJobs[track.cacheKey] = job
+            job.invokeOnCompletion { lyricJobs.remove(track.cacheKey, job) }
+        }
+    }
+
+    private suspend fun refreshLyrics(track: Track, force: Boolean, skipTtl: Boolean): Lyrics =
+        lock(lyricLocks,track.cacheKey).withLock {
         val saved = cachedLyrics(track)
-        val checked = file(track.cacheKey,".lrc.checked").let { runCatching { it.readText().toLong() }.getOrDefault(0) }
+        val (checked, _) = readLyricCheck(track.cacheKey)
         val absent = file(track.cacheKey, ".lrc.none").isFile
-        if (!force && (saved != null || absent) && System.currentTimeMillis() - checked in 0 until CACHE_CHECK_INTERVAL_MS)
+        val interval = if (skipTtl) LYRIC_PLAY_REVALIDATE_MS else CACHE_CHECK_INTERVAL_MS
+        if (!force && (saved != null || absent) && now() - checked in 0 until interval)
             return@withLock saved ?: Lyrics(emptyList(), "")
         if (!force && recentlyFailed(track.cacheKey + ".lrc")) {
             return@withLock saved ?: throw java.io.IOException("Lyrics retry deferred")
@@ -214,7 +230,7 @@ class OfflineAssets(
             val previous = saved?.toTimedLrc().orEmpty()
             sidecarFailures.remove(track.cacheKey + ".lrc")
             persistLyrics(track.cacheKey,fetched,failed = false)
-            writeAtomic(file(track.cacheKey,".lrc.checked"),System.currentTimeMillis().toString())
+            writeLyricCheck(track.cacheKey, lyricRevision(fetched))
             if (previous != fetched.toTimedLrc()) changes.update { it + 1 }
             fetched
         } catch (cancelled: CancellationException) {
@@ -229,6 +245,23 @@ class OfflineAssets(
             persistLyrics(track.cacheKey,null,failed = true)
             throw error
         }
+    }
+
+    private fun lyricRevision(lyrics: Lyrics): String {
+        val text = lyrics.toTimedLrc()
+        return if (text.isBlank()) "none" else key(text)
+    }
+
+    private fun readLyricCheck(cacheKey: String): Pair<Long, String> {
+        val raw = runCatching { file(cacheKey, ".lrc.checked").readText() }.getOrDefault("")
+        val lines = raw.split('\n', limit = 2)
+        val checked = lines.getOrNull(0)?.toLongOrNull() ?: 0L
+        val revision = lines.getOrNull(1).orEmpty()
+        return checked to revision
+    }
+
+    private fun writeLyricCheck(cacheKey: String, revision: String) {
+        writeAtomic(file(cacheKey, ".lrc.checked"), "${now()}\n$revision")
     }
 
     /** Missing server metadata is valid; failed requests can be retried separately from audio. */

@@ -89,6 +89,68 @@ class OfflineAssetsTest {
         assertEquals("Updated",assets.lyrics(track,force = true).lineAt(1000));assertEquals(before,calls)
     }
 
+    @Test fun playRevalidatesCachedLyricsWhenServerCopyChanges() = runBlocking {
+        var clock = 1_000_000L
+        var text = "[00:01.00]Original"
+        var calls = 0
+        val gateway = object : AnyListenGateway by MockAnyListenGateway() {
+            override fun isOnline() = true
+            override suspend fun resolveLyrics(track: Track): Lyrics { calls++; return LrcParser.parse(text) }
+        }
+        val http = OkHttpClient()
+        val assets = OfflineAssets(
+            temp.newFolder(), gateway, FileDownloader(http), ArtworkStore(temp.newFolder(), http),
+            { clock }, { "https://example.test" },
+        )
+        assertEquals("Original", assets.lyrics(track).lineAt(1000))
+        assertEquals(1, calls)
+        text = "[00:01.00]Updated on server"
+        repeat(4) { assertEquals("Original", assets.lyrics(track).lineAt(1000)) }
+        delay(50)
+        assertEquals(1, calls)
+        assertEquals("Original", assets.cachedLyrics(track)!!.lineAt(1000))
+        clock += LYRIC_PLAY_REVALIDATE_MS
+        val notified = assets.updates.value
+        assertEquals("Original", assets.lyrics(track).lineAt(1000))
+        withTimeout(5_000) {
+            while (assets.cachedLyrics(track)?.lineAt(1000) != "Updated on server") delay(10)
+        }
+        assertEquals("Updated on server", assets.cachedLyrics(track)!!.lineAt(1000))
+        assertTrue(assets.updates.value > notified)
+        assertEquals(2, calls)
+        assertEquals("Updated on server", assets.lyrics(track).lineAt(1000))
+        delay(50)
+        assertEquals(2, calls)
+    }
+
+    @Test fun playRevalidatesMissingLyricsWhenServerAddsThem() = runBlocking {
+        var clock = 1_000_000L
+        var available = false
+        var calls = 0
+        val gateway = object : AnyListenGateway by MockAnyListenGateway() {
+            override fun isOnline() = true
+            override suspend fun resolveLyrics(track: Track): Lyrics {
+                calls++
+                return LrcParser.parse(if (available) "[00:01.00]Added later" else "")
+            }
+        }
+        val http = OkHttpClient()
+        val assets = OfflineAssets(
+            temp.newFolder(), gateway, FileDownloader(http), ArtworkStore(temp.newFolder(), http),
+            { clock }, { "https://example.test" },
+        )
+        assertTrue(assets.lyrics(track).lines.isEmpty())
+        assertEquals(1, calls)
+        available = true
+        clock += LYRIC_PLAY_REVALIDATE_MS
+        assertTrue(assets.lyrics(track).lines.isEmpty())
+        withTimeout(5_000) {
+            while (assets.cachedLyrics(track)?.lineAt(1000) != "Added later") delay(10)
+        }
+        assertEquals("Added later", assets.cachedLyrics(track)!!.lineAt(1000))
+        assertEquals(2, calls)
+    }
+
     @Test fun retainedAudioRefreshesInPlaceAndKeepsPlayableBytesOnFailureAndOffline() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("original audio"))

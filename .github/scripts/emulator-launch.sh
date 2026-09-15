@@ -45,7 +45,11 @@ start_and_watch() {
 
 repro_beta2() {
   echo "== Repro shipped v0.1.1-beta.2 (expected crash; do not fail the job) =="
-  curl -fsSL -o /tmp/beta2.apk "$BETA2_URL"
+  if ! curl -fsSL -o /tmp/beta2.apk "$BETA2_URL"; then
+    echo "NOTE: beta.2 APK is not available at ${BETA2_URL}; skipping repro."
+    printf 'skipped: missing beta.2 apk from %s\n' "$BETA2_URL" > beta2-logcat.txt
+    return 0
+  fi
   adb install -r -t /tmp/beta2.apk
   set +e
   start_and_watch "$RELEASE_PKG" beta2-logcat.txt

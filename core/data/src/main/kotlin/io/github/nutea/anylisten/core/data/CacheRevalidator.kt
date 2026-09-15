@@ -19,6 +19,13 @@ import java.util.concurrent.ConcurrentHashMap
 
 const val CACHE_CHECK_INTERVAL_MS = 15 * 60 * 1000L
 
+/**
+ * Coalesce getMusicLyric calls that happen together at play start (player UI + sidecar cache).
+ * After this window, the next play/display of the same track revalidates against the server.
+ * Must stay well below [CACHE_CHECK_INTERVAL_MS]; web calls getMusicLyric on every play.
+ */
+const val LYRIC_PLAY_REVALIDATE_MS = 5_000L
+
 /** Conditional GET with atomic replacement. Validators always describe the committed bytes. */
 class CacheRevalidator(private val http: OkHttpClient, private val now: () -> Long = System::currentTimeMillis) {
     private val locks = Array(32) { Mutex() }

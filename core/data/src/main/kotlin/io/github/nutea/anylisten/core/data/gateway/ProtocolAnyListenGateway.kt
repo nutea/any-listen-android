@@ -108,6 +108,8 @@ class ProtocolAnyListenGateway(
     }
 
     override suspend fun resolveLyrics(track: Track): Lyrics {
+        // Match web loadMusicLyric: omit isRefresh (server default false). isRefresh=true
+        // skips edited DB lyrics and sidecar .lrc files for local tracks.
         val payload = Message2Call.obj("musicInfo" to ProtocolDtos.trackToProtocol(track))
         val result = connection.withChannel { it.call(listOf("getMusicLyric"), listOf(payload)) }?.jsonObject
         val info = result?.get("info")?.jsonObject

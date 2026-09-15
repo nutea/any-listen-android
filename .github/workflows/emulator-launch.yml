@@ -17,6 +17,9 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+        with:
+          # The legacy `tools` package is gone from Google's SDK repo.
+          packages: platform-tools
       - name: Unit tests and lint
         run: |
           chmod +x gradlew
@@ -32,6 +35,9 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+        with:
+          # The legacy `tools` package is gone from Google's SDK repo.
+          packages: platform-tools
       - name: Assemble minified release
         run: |
           chmod +x gradlew
@@ -87,6 +93,9 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+        with:
+          # The legacy `tools` package is gone from Google's SDK repo.
+          packages: platform-tools
       - name: Assemble minified release
         run: |
           chmod +x gradlew
