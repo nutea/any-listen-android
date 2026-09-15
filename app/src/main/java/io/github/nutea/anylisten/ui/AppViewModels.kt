@@ -380,6 +380,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         c.seekToNextMediaItem()
+        c.play()
     }
 
     fun skipPrevious() {
@@ -389,6 +390,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         c.seekToPreviousMediaItem()
+        c.play()
     }
 
     fun seekTo(positionMs: Long) {

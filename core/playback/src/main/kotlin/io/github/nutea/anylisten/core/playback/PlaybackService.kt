@@ -172,6 +172,9 @@ class PlaybackService : MediaSessionService() {
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     mediaItem?.mediaId?.let { laterKeys.remove(it) }
+                    if (TrackChangePlayback.shouldPlayAfterTransition(reason, exo.playWhenReady)) {
+                        exo.play()
+                    }
                     refreshSessionButtons()
                     cacheCurrentArtwork()
                     cacheCurrentTrack()
