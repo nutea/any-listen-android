@@ -31,8 +31,8 @@ class OfflineAssets(
     private val gateway: AnyListenGateway,
     private val downloader: FileDownloader,
     private val artwork: ArtworkStore,
-    private val baseUrl: () -> String,
     private val now: () -> Long = { System.currentTimeMillis() },
+    private val baseUrl: () -> String,
 ) {
     private val changes = MutableStateFlow(0L)
     val updates = changes.asStateFlow()

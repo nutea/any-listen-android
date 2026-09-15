@@ -100,7 +100,7 @@ class OfflineAssetsTest {
         val http = OkHttpClient()
         val assets = OfflineAssets(
             temp.newFolder(), gateway, FileDownloader(http), ArtworkStore(temp.newFolder(), http),
-            { "https://example.test" }, { clock },
+            { clock }, { "https://example.test" },
         )
         assertEquals("Original", assets.lyrics(track).lineAt(1000))
         assertEquals(1, calls)
@@ -137,7 +137,7 @@ class OfflineAssetsTest {
         val http = OkHttpClient()
         val assets = OfflineAssets(
             temp.newFolder(), gateway, FileDownloader(http), ArtworkStore(temp.newFolder(), http),
-            { "https://example.test" }, { clock },
+            { clock }, { "https://example.test" },
         )
         assertTrue(assets.lyrics(track).lines.isEmpty())
         assertEquals(1, calls)

@@ -53,7 +53,7 @@ class AppContainer(context: Context) {
     val gateway = ProtocolAnyListenGateway(connection)
     val artwork = ArtworkStore(appContext.filesDir.resolve("artwork"), clients.api, { gateway.isOnline() }, { !maintenance.active })
     val offlineAssets = OfflineAssets(appContext.filesDir.resolve("offline"), gateway,
-        FileDownloader(clients.api), artwork, { sessionStore.current()?.profile?.baseUrl.orEmpty() })
+        FileDownloader(clients.api), artwork) { sessionStore.current()?.profile?.baseUrl.orEmpty() }
     val library = LibraryRepository(db.libraryDao(), gateway)
     val recentlyPlayed = RecentlyPlayedRecorder(library)
     val session = SessionRepository(connection)
