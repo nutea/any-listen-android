@@ -12,6 +12,9 @@ import io.github.nutea.anylisten.core.model.Playlist
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import io.github.nutea.anylisten.core.model.RecentlyPlayed
 import io.github.nutea.anylisten.core.model.RecentlyPlayedMutation
+import io.github.nutea.anylisten.core.model.PlaylistEdit
+import io.github.nutea.anylisten.core.model.canManage
+import io.github.nutea.anylisten.core.model.validPlaylistName
 import io.github.nutea.anylisten.core.model.Track
 
 class MockAnyListenGateway : AnyListenGateway {
@@ -42,6 +45,37 @@ class MockAnyListenGateway : AnyListenGateway {
 
     override suspend fun resolveLyrics(track: Track): Lyrics =
         LrcParser.parse("[00:00.00]${track.title}\n[00:03.00]${track.artist}")
+
+    override suspend fun editPlaylist(edit: PlaylistEdit) {
+        if (!online) throw AppError(ErrorKind.OFFLINE_MUTATION, "Server edits are disabled offline")
+        val lists = snapshot.playlists.toMutableList()
+        when (edit) {
+            is PlaylistEdit.Create -> {
+                require(validPlaylistName(edit.name) && lists.none { it.id == edit.id })
+                lists.add(Playlist(edit.id, edit.name.trim(), "general", 0))
+            }
+            is PlaylistEdit.Rename -> {
+                val index = lists.indexOfFirst { it.id == edit.id && it.canManage }
+                require(index >= 0 && validPlaylistName(edit.name))
+                lists[index] = lists[index].copy(name = edit.name.trim())
+            }
+            is PlaylistEdit.Delete -> {
+                require(lists.any { it.id == edit.id && it.canManage })
+                lists.removeAll { it.id == edit.id }
+            }
+            is PlaylistEdit.Move -> {
+                require(edit.delta == -1 || edit.delta == 1)
+                val custom = lists.filter { it.id !in setOf("default", "love", "last_played") }
+                val index = custom.indexOfFirst { it.id == edit.id && it.canManage }
+                require(index >= 0)
+                val target = (index + edit.delta).coerceIn(0, custom.lastIndex)
+                val destination = lists.indexOf(custom[target])
+                val item = lists.removeAt(lists.indexOf(custom[index]))
+                lists.add(destination, item)
+            }
+        }
+        snapshot = snapshot.copy(playlists = lists, tracksByPlaylist = lists.associate { it.id to snapshot.tracksByPlaylist[it.id].orEmpty() })
+    }
 
     override suspend fun addToPlaylist(playlistId: String, track: Track) {
         if (!online) throw AppError(ErrorKind.OFFLINE_MUTATION, "Server edits are disabled offline")

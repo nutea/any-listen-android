@@ -226,11 +226,13 @@ class MusicExperienceTest {
 
     @Test fun playingIndicatorAnimatesAndStopsWhenPaused() {
         val playing = mutableStateOf(true)
+        // Infinite animations are cancelled by the test clock while autoAdvance is enabled.
+        // Freeze before composition starts so the animation remains available for manual frames.
+        compose.mainClock.autoAdvance = false
         show { LibraryContent(library(), tracks[0].cacheKey, { null }, { true }, {}, {}, {}, {},
             offlineReady = { true }, isPlaying = playing.value) { _, _ -> } }
         compose.onNodeWithContentDescription(label(R.string.cd_favorite)).assertDoesNotExist()
         compose.onNodeWithContentDescription(label(R.string.offline_ready)).assertDoesNotExist()
-        compose.mainClock.autoAdvance = false
         fun pixels(): List<androidx.compose.ui.graphics.Color> {
             val map = compose.onNodeWithTag("playback_indicator", useUnmergedTree = true).captureToImage().toPixelMap()
             return (0 until map.height).flatMap { y -> (0 until map.width).map { x -> map[x, y] } }

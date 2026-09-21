@@ -17,6 +17,7 @@ data class SessionInfo(
  * `SessionConnectionManager`; a gateway only knows how to ask a live session for data.
  */
 interface AnyListenGateway {
+    suspend fun editPlaylist(edit: io.github.nutea.anylisten.core.model.PlaylistEdit)
     suspend fun refreshLibrary(): LibrarySnapshot
     suspend fun refreshLibrary(cached: LibrarySnapshot, changedPlaylistIds: Set<String>): LibrarySnapshot = refreshLibrary()
     suspend fun resolveMedia(track: Track, refresh: Boolean = false): MediaResource

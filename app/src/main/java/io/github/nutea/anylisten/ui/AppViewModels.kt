@@ -37,6 +37,8 @@ import io.github.nutea.anylisten.core.model.Lyrics
 import io.github.nutea.anylisten.core.model.PlayLater
 import io.github.nutea.anylisten.core.model.PlaybackMode
 import io.github.nutea.anylisten.core.model.Playlist
+import io.github.nutea.anylisten.core.model.PlaylistEdit
+import io.github.nutea.anylisten.core.model.LyricTiming
 import io.github.nutea.anylisten.core.model.TrackSort
 import io.github.nutea.anylisten.core.model.TrackSortField
 import io.github.nutea.anylisten.core.model.ProtocolConstants
@@ -60,6 +62,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -85,6 +88,9 @@ data class LibraryUiState(
     val query: String = "",
     val selected: Playlist? = null,
     val filtered: List<Track> = emptyList(),
+    val playlistBusy: Boolean = false,
+    val playlistError: String? = null,
+    val playlistEditSuccess: Int = 0,
     val pendingAdd: List<Track>? = null,
     val pendingDownload: List<Track>? = null,
     val status: String? = null,
@@ -95,6 +101,12 @@ data class LibraryUiState(
 data class PlayerUiState(
     val track: Track? = null,
     val lyrics: Lyrics? = null,
+    val lyricOffsetMs: Long = 0,
+    val showTranslation: Boolean = true,
+    val showRomanization: Boolean = true,
+    val karaokeEnabled: Boolean = true,
+    val positionSampleTimeMs: Long = 0,
+    val playbackSpeed: Float = 1f,
     val queue: List<Track> = emptyList(),
     val error: String? = null,
     val isPlaying: Boolean = false,
@@ -111,11 +123,17 @@ data class PlayerUiState(
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 class AppViewModel(application: Application) : AndroidViewModel(application) {
+    val musicComments get() = container.comments
     private val container: AppContainer = (application as AnyListenApp).container
     private val _connect = MutableStateFlow(ConnectUiState())
     val connect: StateFlow<ConnectUiState> = _connect.asStateFlow()
     private val _library = MutableStateFlow(LibraryUiState())
     val library: StateFlow<LibraryUiState> = _library.asStateFlow()
+    val catalog = library.map { it.snapshot }.distinctUntilChanged()
+        .map { snapshot -> kotlinx.coroutines.withContext(Dispatchers.Default) {
+            io.github.nutea.anylisten.core.model.MusicCatalog.build(snapshot)
+        } }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000),
+            io.github.nutea.anylisten.core.model.MusicCatalog.Index(emptyList(), emptyList()))
     private val _player = MutableStateFlow(PlayerUiState())
     val player: StateFlow<PlayerUiState> = _player.asStateFlow()
     private val _downloads = MutableStateFlow<List<DownloadRecord>>(emptyList())
@@ -212,6 +230,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 container.refreshCachedResources()
             }
         }
+        safeLaunch {
+            combine(_player.map { it.track?.identity?.cacheKey(null) }.distinctUntilChanged(), container.settings.lyricSettings) { key, prefs ->
+                key to prefs
+            }.collect { (key, prefs) ->
+                _player.update { state ->
+                    if (state.track?.identity?.cacheKey(null) == key) state.copy(
+                        lyricOffsetMs = LyricTiming.clamp(prefs.offsets[key] ?: 0L), showTranslation = prefs.showTranslation,
+                        showRomanization = prefs.showRomanization, karaokeEnabled = prefs.karaokeEnabled,
+                    ) else state
+                }
+            }
+        }
         safeLaunch { container.settings.themeMode.collect { _themeMode.value = it } }
         safeLaunch { container.settings.autoCacheAudio.collect { _autoCacheAudio.value = it } }
         observeConnection()
@@ -234,6 +264,37 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _library.update { state ->
             if (state.query == value) state else state.copy(query = value, filtered = filter(state.snapshot, state.selected, value, state.sort, state.sortAscending))
         }
+    }
+
+    fun clearPlaylistError() { _library.update { it.copy(playlistError = null) } }
+
+    fun editPlaylist(edit: PlaylistEdit) {
+        if (_library.value.playlistBusy) return
+        _library.update { it.copy(playlistBusy = true, playlistError = null) }
+        safeLaunch {
+            try {
+                container.library.editPlaylist(edit)
+                _library.update { it.copy(playlistEditSuccess = it.playlistEditSuccess + 1) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _library.update { it.copy(playlistError = message(error)) }
+            } finally {
+                _library.update { it.copy(playlistBusy = false) }
+            }
+        }
+    }
+
+    fun setShowTranslation(show: Boolean) = safeLaunch { container.settings.setShowTranslation(show) }
+
+    fun setShowRomanization(show: Boolean) = safeLaunch { container.settings.setShowRomanization(show) }
+    fun setKaraokeEnabled(enabled: Boolean) = safeLaunch { container.settings.setKaraokeEnabled(enabled) }
+
+    fun setLyricOffset(offsetMs: Long) {
+        val key = _player.value.track?.identity?.cacheKey(null) ?: return
+        val offset = LyricTiming.clamp(offsetMs)
+        _player.update { it.copy(lyricOffsetMs = offset) }
+        safeLaunch { container.settings.setLyricOffset(key, offset) }
     }
 
     fun selectPlaylist(playlist: Playlist) {
@@ -695,9 +756,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun currentLyricIndex(): Int {
-        val lines = _player.value.lyrics?.lines.orEmpty()
+        val lines = _player.value.lyrics?.displayLines(_player.value.karaokeEnabled).orEmpty()
         if (lines.isEmpty()) return -1
-        val pos = _player.value.positionMs
+        val pos = LyricTiming.position(_player.value.positionMs, _player.value.lyricOffsetMs)
         return lines.indexOfLast { it.timeMs <= pos }.coerceAtLeast(0)
     }
 
@@ -825,6 +886,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 isBuffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING && player.playerError == null,
                 error = if (player.playerError == null) null else it.error,
                 positionMs = player.currentPosition.coerceAtLeast(0L),
+                positionSampleTimeMs = android.os.SystemClock.elapsedRealtime(),
+                playbackSpeed = player.playbackParameters.speed,
                 durationMs = duration,
                 availableOffline = track?.let { isAvailableOffline(it) } == true,
                 shuffled = player.shuffleModeEnabled,

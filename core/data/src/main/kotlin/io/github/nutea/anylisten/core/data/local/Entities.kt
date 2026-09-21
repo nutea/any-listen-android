@@ -67,11 +67,12 @@ data class PlaylistEntity(
     val coverUrl: String?,
     val canMutateOnline: Boolean,
     val refreshedAtEpochMs: Long,
+    @androidx.room.ColumnInfo(defaultValue = "0") val position: Int = 0,
 ) {
     fun toModel() = Playlist(id, name, type, trackCount, coverUrl, canMutateOnline = canMutateOnline)
 
     companion object {
-        fun from(item: Playlist, refreshedAt: Long) = PlaylistEntity(
+        fun from(item: Playlist, refreshedAt: Long, position: Int = 0) = PlaylistEntity(
             id = item.id,
             name = item.name,
             type = item.type,
@@ -79,6 +80,7 @@ data class PlaylistEntity(
             coverUrl = item.coverUrl,
             canMutateOnline = item.canMutateOnline,
             refreshedAtEpochMs = refreshedAt,
+            position = position,
         )
     }
 }

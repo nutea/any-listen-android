@@ -113,3 +113,9 @@ keyPassword=...
 - versionName: 0.1.2；versionCode: 9；正式包名不变。版本名不含 beta / rc / alpha。
 - 相对 v0.1.0：纳入网络重连（PR #1 一脉）、CI 标签签名（beta.2）、连接 / 会话重构（PR #7 / beta.5）。beta.3 的 SecureSessionStore hardening 已在 beta.4 撤回。登录闪退与播放未缓存歌曲时切换网络闪退均已修复。见 [RELEASE_NOTES_0.1.2.md](RELEASE_NOTES_0.1.2.md)。
 - 合并后由协调者打标签 `v0.1.2`，现有 CI 签名并发布正式 Release（非 Pre-release）。不要在本变更中打标签，也不要移动或重打既有测试版标签。未轮换签名密钥。
+
+## 测试版 v0.1.4-beta.1
+
+- versionName: 0.1.4-beta.1；versionCode: 11；正式包名及现有签名密钥不变。
+- 歌单管理、多种歌词、评论、歌手与专辑页面，见 [发布说明](RELEASE_NOTES_0.1.4-beta.1.md)。
+- 发布前审查与验证见 [审查记录](REVIEW_0.1.4-beta.1.md)；本轮设备测试使用 Android 16 ARM64 模拟器。

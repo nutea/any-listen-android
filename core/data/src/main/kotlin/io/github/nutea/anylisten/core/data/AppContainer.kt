@@ -51,6 +51,7 @@ class AppContainer(context: Context) {
     )
 
     val gateway = ProtocolAnyListenGateway(connection)
+    val comments = io.github.nutea.anylisten.core.data.repo.CommentRepository(gateway.comments)
     val artwork = ArtworkStore(appContext.filesDir.resolve("artwork"), clients.api, { gateway.isOnline() }, { !maintenance.active })
     val offlineAssets = OfflineAssets(appContext.filesDir.resolve("offline"), gateway,
         FileDownloader(clients.api), artwork) { sessionStore.current()?.profile?.baseUrl.orEmpty() }

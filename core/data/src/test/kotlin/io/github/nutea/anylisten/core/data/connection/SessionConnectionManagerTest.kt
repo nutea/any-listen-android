@@ -361,6 +361,25 @@ class SessionConnectionManagerTest {
         assertEquals(world.channels.trace, 0, world.channels.opened)
     }
 
+    @Test
+    fun nonIdempotentWritesAreNotReplayedAfterConnectionLoss() = runBlocking {
+        val world = World()
+        world.store.save(profile(), "token", "secret")
+        val manager = world.manager()
+        withTimeout(WAIT) { manager.ensureConnected() }
+        var attempts = 0
+        try {
+            manager.withChannel(retryOnDisconnect = false) {
+                attempts++
+                throw io.github.nutea.anylisten.core.data.gateway.IpcClosedException("Lost acknowledgement")
+            }
+            org.junit.Assert.fail("Expected transport error")
+        } catch (error: AppError) {
+            assertEquals(ErrorKind.NETWORK_UNREACHABLE, error.kind)
+        }
+        assertEquals(1, attempts)
+    }
+
     private fun profile() = ServerProfile(id = "p", baseUrl = "https://example.test")
 
     private inner class World(private val authDelayMs: Long = 0L) {

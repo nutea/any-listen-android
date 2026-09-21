@@ -11,6 +11,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProtocolDtosTest {
+    @Test fun preservesRomanizationAndKaraokeAlongsideOrdinaryLyrics() {
+        val lyrics = ProtocolDtos.lyricsFrom(JsonObject(mapOf(
+            "lyric" to JsonPrimitive("[00:01.00]風"), "tlyric" to JsonPrimitive("[00:01.00]风"),
+            "rlyric" to JsonPrimitive("[00:01.00]kaze"), "awlyric" to JsonPrimitive("[00:01.00]<0,500>風"))))
+        assertEquals("kaze", lyrics.lines.single().romanization)
+        assertEquals("风", lyrics.karaokeLines.single().translation)
+        assertEquals(1000L, lyrics.karaokeLines.single().words.single().startTimeMs)
+    }
+
     @Test
     fun mapsTrackAndLists() {
         val trackJson = JsonObject(

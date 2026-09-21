@@ -57,6 +57,12 @@ class LibraryRepository(
         }
     }
 
+    suspend fun editPlaylist(edit: io.github.nutea.anylisten.core.model.PlaylistEdit) {
+        if (!gateway.isOnline()) throw AppError(ErrorKind.OFFLINE_MUTATION, "Server edits are disabled offline")
+        gateway.editPlaylist(edit)
+        refresh()
+    }
+
     suspend fun addToPlaylist(playlistId: String, track: Track) {
         if (!gateway.isOnline()) throw AppError(ErrorKind.OFFLINE_MUTATION, "Server edits are disabled offline")
         gateway.addToPlaylist(playlistId, track)
@@ -100,7 +106,7 @@ class LibraryRepository(
 
     private suspend fun persist(snapshot: LibrarySnapshot) {
         addMusicLocationType.value = snapshot.addMusicLocationType
-        val playlists = snapshot.playlists.map { PlaylistEntity.from(it, snapshot.refreshedAtEpochMs) }
+        val playlists = snapshot.playlists.mapIndexed { index, item -> PlaylistEntity.from(item, snapshot.refreshedAtEpochMs, index) }
         val tracks = snapshot.tracksByPlaylist.values.flatten().map { TrackEntity.from(it) }
         val entries = snapshot.tracksByPlaylist.flatMap { (playlistId, items) ->
             items.mapIndexed { index, track ->
@@ -167,7 +173,7 @@ class RecentlyPlayedRecorder(private val library: LibraryRepository) {
 
 /** Compare persisted content, excluding timestamps and fields the local schema does not retain. */
 internal fun sameLibraryContents(a: LibrarySnapshot, b: LibrarySnapshot): Boolean {
-    fun playlists(snapshot: LibrarySnapshot) = snapshot.playlists.map { PlaylistEntity.from(it, 0L) }
+    fun playlists(snapshot: LibrarySnapshot) = snapshot.playlists.mapIndexed { index, item -> PlaylistEntity.from(item, 0L, index) }
     fun tracks(snapshot: LibrarySnapshot) = snapshot.tracksByPlaylist.mapValues { (_, tracks) ->
         tracks.map { TrackEntity.from(it).copy(playlistId = null) }
     }

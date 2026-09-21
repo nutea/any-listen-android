@@ -24,6 +24,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
@@ -51,11 +54,17 @@ data class PlayerActions(
     val favorite: () -> Unit, val seek: (Long) -> Unit, val mode: (PlaybackMode) -> Unit,
     val queuePlay: (Track) -> Unit, val queueRemove: (Track) -> Unit,
     val download: () -> Unit = {}, val more: () -> Unit = {},
+    val translation: (Boolean) -> Unit = {}, val lyricOffset: (Long) -> Unit = {},
+    val romanization: (Boolean) -> Unit = {}, val karaoke: (Boolean) -> Unit = {},
+    val comments: () -> Unit = {},
+    val artist: () -> Unit = {}, val album: () -> Unit = {},
 )
 
 @Composable
-fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit) {
+fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit, onArtist: (Track) -> Unit = {}, onAlbum: (Track) -> Unit = {}) {
     val state by vm.player.collectAsState()
+    var showComments by remember { mutableStateOf(false) }
+    if (showComments) state.track?.let { CommentsSheet(it, vm.musicComments) { showComments = false } }
     val library by vm.library.collectAsState()
     val requested by vm.playerSheet.collectAsState()
     val downloadedKeys = downloadedTrackKeys(vm)
@@ -63,7 +72,10 @@ fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit) {
         PlayerActions({ vm.cancelAddToPlaylist(); onBack() }, vm::togglePlayPause, vm::skipPrevious, vm::skipNext,
             { state.track?.let(vm::toggleFavorite) }, vm::seekTo, vm::setPlayMode, vm::playQueueItem, vm::removeQueueItem,
             download = { state.track?.let { vm.download(listOf(it)) } },
-            more = { state.track?.let(vm::startAddToPlaylist) }),
+            more = { state.track?.let(vm::startAddToPlaylist) },
+            translation = vm::setShowTranslation, lyricOffset = vm::setLyricOffset,
+            romanization = vm::setShowRomanization, karaoke = vm::setKaraokeEnabled, comments = { showComments = true },
+            artist = { state.track?.let(onArtist) }, album = { state.track?.let(onAlbum) }),
         source = library.selected?.let { playlistName(it) }, startSheet = requested,
         onSheetConsumed = vm::consumePlayerSheet, downloaded = state.track?.cacheKey in downloadedKeys)
 
@@ -114,7 +126,9 @@ fun PlayerContent(
                     }
                 }
             }
-            Spacer(Modifier.size(48.dp))
+            if (pager.currentPage == 1 && track != null) IconButton(onClick = { sheet = "lyrics" }) {
+                Icon(Icons.Default.Tune, stringResource(R.string.lyric_settings))
+            } else Spacer(Modifier.size(48.dp))
         }
         if (track == null) {
             EmptyContent(Icons.Default.MusicNote, stringResource(R.string.player_empty), stringResource(R.string.player_empty_detail),
@@ -128,18 +142,26 @@ fun PlayerContent(
                             val edge = minOf(maxWidth, maxHeight * .88f, 360.dp)
                             Artwork(cover, Modifier.size(edge), seed = track.album.ifBlank { track.title }, radius = 20.dp)
                         }
-                        val lines = state.lyrics?.lines.orEmpty()
-                        val lyricIndex = lines.indexOfLast { it.timeMs <= state.positionMs }
+                        val lines = state.lyrics?.displayLines(state.karaokeEnabled).orEmpty()
+                        val lyricIndex = lines.indexOfLast { it.timeMs <= LyricTiming.position(state.positionMs, state.lyricOffsetMs) }
                         val preview = lines.getOrNull(lyricIndex)?.text?.takeIf { it.isNotBlank() }
                             ?: lines.firstOrNull { it.text.isNotBlank() }?.text
                             ?: state.lyrics?.raw?.lineSequence()?.firstOrNull { it.isNotBlank() && !it.startsWith("[") }
                             ?: stringResource(R.string.lyrics_empty)
                         Text(track.title, style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 8.dp))
-                        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(trackSubtitle(track), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            if (track.artist.isNotBlank()) TextButton(onClick = actions.artist,
+                                modifier = Modifier.weight(1f).testTag("player_artist"), contentPadding = PaddingValues(end = 8.dp)) {
+                                Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                Icon(Icons.Default.ChevronRight, null, Modifier.size(16.dp))
+                            }
+                            if (track.album.isNotBlank()) TextButton(onClick = actions.album,
+                                modifier = Modifier.weight(1f).testTag("player_album"), contentPadding = PaddingValues(start = 8.dp)) {
+                                Icon(Icons.Default.Album, null, Modifier.padding(end = 4.dp).size(16.dp))
+                                Text(track.album, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                Icon(Icons.Default.ChevronRight, null, Modifier.size(16.dp))
+                            }
                             if (state.availableOffline) Icon(Icons.Default.OfflinePin, stringResource(R.string.track_available_offline),
                                 Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         }
@@ -152,6 +174,7 @@ fun PlayerContent(
                                 Icon(if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                     stringResource(if (favorite) R.string.cd_unfavorite else R.string.cd_favorite))
                             }
+                            IconButton(onClick = actions.comments) { Icon(Icons.Default.Comment, stringResource(R.string.song_comments)) }
                             IconButton(onClick = actions.download, enabled = !downloaded) {
                                 Icon(if (downloaded) Icons.Default.DownloadDone else Icons.Default.Download,
                                     stringResource(if (downloaded) R.string.cd_downloaded else R.string.cd_download))
@@ -167,8 +190,8 @@ fun PlayerContent(
                             modifier = Modifier.padding(start = 8.dp, top = 8.dp))
                         Text(track.artist.ifBlank { source.orEmpty() }, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 8.dp, top = 4.dp, bottom = 4.dp))
-                        key(track.cacheKey) { LyricsPane(state, actions.seek, motion) }
+                            modifier = Modifier.clickable(enabled = track.artist.isNotBlank(), onClick = actions.artist).padding(start = 8.dp, top = 4.dp, bottom = 4.dp))
+                        key(track.cacheKey) { LyricsPane(state, actions.seek, motion, pager.currentPage == 1) }
                     }
                 }
             }
@@ -189,7 +212,7 @@ fun PlayerContent(
         }
     }
     sheet?.let { showing ->
-        ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        ModalBottomSheet(onDismissRequest = { sheet = null }, containerColor = MaterialTheme.colorScheme.surfaceContainer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             when (showing) {
                 "mode" -> {
                     Text(stringResource(R.string.choose_play_mode), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
@@ -203,6 +226,7 @@ fun PlayerContent(
                     }
                     Spacer(Modifier.height(16.dp))
                 }
+                "lyrics" -> LyricSettingsContent(state, actions)
                 "queue" -> QueueSheetContent(state, artwork, actions.queuePlay, actions.queueRemove)
             }
         }
@@ -249,10 +273,12 @@ private fun QueueSheetContent(state: PlayerUiState, artwork: (Track?) -> String?
 }
 
 @Composable
-private fun LyricsPane(state: PlayerUiState, onSeek: (Long) -> Unit, motion: Boolean) {
-    val lines = state.lyrics?.lines.orEmpty()
+private fun LyricsPane(state: PlayerUiState, onSeek: (Long) -> Unit, motion: Boolean, visible: Boolean) {
+    val lines = state.lyrics?.displayLines(state.karaokeEnabled).orEmpty()
     val raw = state.lyrics?.raw.orEmpty()
-    val current = lines.indexOfLast { it.timeMs <= state.positionMs }
+    val playbackPosition by rememberLyricPlaybackPosition(state, visible && motion && state.karaokeEnabled && state.lyrics?.karaokeLines?.isNotEmpty() == true)
+    val lyricPosition = LyricTiming.position(playbackPosition, state.lyricOffsetMs)
+    val current = lines.indexOfLast { it.timeMs <= lyricPosition }
     val scroll = rememberLazyListState()
     var following by rememberSaveable { mutableStateOf(true) }
     val dragging by scroll.interactionSource.collectIsDraggedAsState()
@@ -272,7 +298,10 @@ private fun LyricsPane(state: PlayerUiState, onSeek: (Long) -> Unit, motion: Boo
                     .88f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
             }
         if (lines.isEmpty()) {
-            if (raw.isNotBlank()) Text(raw, fontSize = 24.sp, lineHeight = 38.sp,
+            val plain = listOfNotNull(raw.takeIf { it.isNotBlank() },
+                state.lyrics?.romanizationRaw?.takeIf { state.showRomanization && it.isNotBlank() },
+                state.lyrics?.translationRaw?.takeIf { state.showTranslation && it.isNotBlank() }).joinToString("\n\n")
+            if (plain.isNotBlank()) Text(plain, fontSize = 24.sp, lineHeight = 38.sp,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxSize().then(fade).testTag("plain_lyrics")
                     .verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 32.dp))
@@ -284,13 +313,26 @@ private fun LyricsPane(state: PlayerUiState, onSeek: (Long) -> Unit, motion: Boo
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = topSpace, bottom = bottomSpace)) {
                 itemsIndexed(lines) { index, line ->
                     val active = index == current
-                    Text(line.text.ifBlank { "♪" }, fontSize = 26.sp, lineHeight = 39.sp,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        color = if (active) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = if (index < current) .40f else .58f),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                            .clickable { onSeek(line.timeMs); following = true }
-                            .padding(vertical = 14.dp))
+                    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                        .clickable { onSeek(LyricTiming.seek(line.timeMs, state.lyricOffsetMs)); following = true }
+                        .padding(vertical = 14.dp)) {
+                        if (active && state.karaokeEnabled && line.words.isNotEmpty()) {
+                            KaraokeLyricText(line, lyricPosition)
+                        } else Text(line.text.ifBlank { "♪" }, fontSize = 26.sp, lineHeight = 39.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            color = if (active) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = if (index < current) .40f else .58f))
+                        if (state.showRomanization && !line.romanization.isNullOrBlank()) {
+                            Text(line.romanization.orEmpty(), fontSize = 15.sp, lineHeight = 23.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (active) 1f else .7f),
+                                modifier = Modifier.padding(top = 6.dp))
+                        }
+                        if (state.showTranslation && !line.translation.isNullOrBlank()) {
+                            Text(line.translation.orEmpty(), fontSize = 18.sp, lineHeight = 27.sp,
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp))
+                        }
+                    }
                 }
             }
             if (!following) {
@@ -407,4 +449,65 @@ internal fun modeLabel(mode: PlaybackMode) = when (mode) {
 internal fun formatMs(ms: Long): String {
     val total = (ms / 1000L).coerceAtLeast(0L)
     return "${total / 60}:${(total % 60).toString().padStart(2, '0')}"
+}
+
+
+@Composable
+private fun LyricSettingsContent(state: PlayerUiState, actions: PlayerActions) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
+        Text(stringResource(R.string.lyric_settings), style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.lyric_settings_subtitle), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 20.dp))
+        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            Column {
+                LyricOptionRow(Icons.Default.Translate, R.string.lyric_translation,
+                    if (state.lyrics?.translationRaw.isNullOrBlank()) R.string.lyric_no_translation else R.string.lyric_translation_hint,
+                    state.showTranslation, actions.translation, "lyric_translation_toggle")
+                HorizontalDivider(Modifier.padding(start = 56.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                LyricOptionRow(Icons.Default.Abc, R.string.lyric_romanization,
+                    if (state.lyrics?.romanizationRaw.isNullOrBlank()) R.string.lyric_no_romanization else R.string.lyric_romanization_hint,
+                    state.showRomanization, actions.romanization, "lyric_romanization_toggle")
+                HorizontalDivider(Modifier.padding(start = 56.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                LyricOptionRow(Icons.Default.GraphicEq, R.string.lyric_karaoke,
+                    if (state.lyrics?.karaokeLines.isNullOrEmpty()) R.string.lyric_no_karaoke else R.string.lyric_karaoke_hint,
+                    state.karaokeEnabled, actions.karaoke, "lyric_karaoke_toggle")
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.lyric_sync), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            TextButton(onClick = { actions.lyricOffset(0) }, enabled = state.lyricOffsetMs != 0L) { Text(stringResource(R.string.lyric_offset_reset)) }
+        }
+        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(stringResource(R.string.lyric_offset, state.lyricOffsetMs), style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("lyric_offset_value").padding(bottom = 14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilledTonalButton(onClick = { actions.lyricOffset(LyricTiming.clamp(state.lyricOffsetMs - 100)) },
+                        modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp),
+                        enabled = state.lyricOffsetMs > -LyricTiming.LIMIT_MS) { Text(stringResource(R.string.lyric_earlier)) }
+                    FilledTonalButton(onClick = { actions.lyricOffset(LyricTiming.clamp(state.lyricOffsetMs + 100)) },
+                        modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp),
+                        enabled = state.lyricOffsetMs < LyricTiming.LIMIT_MS) { Text(stringResource(R.string.lyric_later)) }
+                }
+            }
+        }
+        Text(stringResource(R.string.lyric_offset_hint), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 24.dp))
+    }
+}
+
+@Composable
+private fun LyricOptionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: Int, subtitle: Int,
+    checked: Boolean, onChecked: (Boolean) -> Unit, tag: String) {
+    Row(Modifier.fillMaxWidth().testTag(tag).toggleable(value = checked, role = Role.Switch, onValueChange = onChecked)
+        .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(title), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 3.dp))
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
 }

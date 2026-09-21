@@ -69,6 +69,67 @@ class OfflineAssetsTest {
         }
     }
 
+    @Test fun romanizationAndWordTimingRefreshPersistOfflineAndCleanUp() = runBlocking {
+        var online = true
+        var roma = "[00:01.00]kaze"
+        var karaoke = "[00:01.00]<0,500>風"
+        val gateway = object : AnyListenGateway by MockAnyListenGateway() {
+            override fun isOnline() = online
+            override suspend fun resolveLyrics(track: Track) = LrcParser.parse("[00:01.00]風", "[00:01.00]风", roma, karaoke)
+        }
+        val http = OkHttpClient()
+        val folder = temp.newFolder()
+        val artwork = ArtworkStore(temp.newFolder(), http, { online })
+        fun assets() = OfflineAssets(folder, gateway, FileDownloader(http), artwork) { "https://example.test" }
+        val first = assets()
+        first.lyrics(track)
+        val revision = first.updates.value
+        roma = "[00:01.00]ka ze"
+        karaoke = "[00:01.00]<0,1000>風"
+        first.lyrics(track, force = true)
+        assertTrue(first.updates.value > revision)
+        online = false
+        val cached = assets().lyrics(track)
+        assertEquals("ka ze", cached.lines.single().romanization)
+        assertEquals(1000L, cached.karaokeLines.single().words.single().durationMs)
+        assertEquals("风", cached.karaokeLines.single().translation)
+        online = true
+        roma = ""; karaoke = ""
+        first.lyrics(track, force = true)
+        online = false
+        assertNull(assets().lyrics(track).lines.single().romanization)
+        assertTrue(assets().lyrics(track).karaokeLines.isEmpty())
+        first.clearTrack(track.cacheKey)
+        assertNull(assets().cachedLyrics(track))
+        assertFalse(folder.listFiles().orEmpty().any { it.extension in setOf("rlrc", "awlrc", "tlrc", "lrc") })
+    }
+
+    @Test fun translationsSurviveRestartRefreshAndOfflineAndAreRemovedWhenAbsent() = runBlocking {
+        var translated = "[00:01.00]译文"
+        var online = true
+        val gateway = object : AnyListenGateway by MockAnyListenGateway() {
+            override fun isOnline() = online
+            override suspend fun resolveLyrics(track: Track) = LrcParser.parse("[00:01.00]Original", translated)
+        }
+        val http = OkHttpClient()
+        val folder = temp.newFolder()
+        val artwork = ArtworkStore(temp.newFolder(), http, { online })
+        fun assets() = OfflineAssets(folder, gateway, FileDownloader(http), artwork) { "https://example.test" }
+        val first = assets()
+        assertEquals("译文", first.lyrics(track).lines.single().translation)
+        translated = "[00:01.00]更新翻译"
+        val revision = first.updates.value
+        first.lyrics(track, force = true)
+        assertTrue(first.updates.value > revision)
+        online = false
+        assertEquals("更新翻译", assets().lyrics(track).lines.single().translation)
+        online = true
+        translated = ""
+        first.lyrics(track, force = true)
+        online = false
+        assertNull(assets().lyrics(track).lines.single().translation)
+    }
+
     @Test fun existingLyricsRefreshOnlineAndFallbackOfflineOrOnFailure() = runBlocking {
         var text = "[00:01.00]Original"
         var online = true

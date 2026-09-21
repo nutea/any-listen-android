@@ -33,6 +33,8 @@ class ProtocolAnyListenGateway(
     private val connection: SessionConnectionManager,
 ) : AnyListenGateway {
 
+    val comments = MusicComments { method, args -> connection.withChannel { it.call(listOf(method), args) } }
+
     @Volatile private var lastAddMusicLocationType = AddMusicLocationType.TOP
 
     override fun isOnline(): Boolean = connection.isOnline
@@ -42,6 +44,18 @@ class ProtocolAnyListenGateway(
     private val baseUrl: String
         get() = connection.session.value?.profile?.baseUrl
             ?: throw AppError(ErrorKind.SESSION_EXPIRED, "Not signed in")
+
+    private val playlistManagement = PlaylistManagement(
+        online = ::isOnline,
+        read = { connection.withChannel { it.call(listOf("getAllUserLists")) }!!.jsonObject },
+        write = { action, data ->
+            connection.withChannel(retryOnDisconnect = false) {
+                it.call(listOf("listAction"), listOf(Message2Call.obj("action" to JsonPrimitive(action), "data" to data)))
+            }
+        },
+    )
+
+    override suspend fun editPlaylist(edit: io.github.nutea.anylisten.core.model.PlaylistEdit) = playlistManagement.apply(edit)
 
     override suspend fun refreshLibrary(): LibrarySnapshot = readLibrary(null, null)
 
@@ -113,9 +127,7 @@ class ProtocolAnyListenGateway(
         val payload = Message2Call.obj("musicInfo" to ProtocolDtos.trackToProtocol(track))
         val result = connection.withChannel { it.call(listOf("getMusicLyric"), listOf(payload)) }?.jsonObject
         val info = result?.get("info")?.jsonObject
-        val raw = listOf("lyric", "awlyric", "tlyric")
-            .firstNotNullOfOrNull { key -> info?.get(key)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } }
-        return LrcParser.parse(raw)
+        return ProtocolDtos.lyricsFrom(info)
     }
 
     override suspend fun addToPlaylist(playlistId: String, track: Track) {
@@ -221,7 +233,7 @@ class ProtocolAnyListenGateway(
         return lastAddMusicLocationType
     }
 
-    private suspend fun listAction(action: String, data: JsonObject) {
+    private suspend fun listAction(action: String, data: kotlinx.serialization.json.JsonElement) {
         connection.withChannel {
             it.call(
                 listOf("listAction"),

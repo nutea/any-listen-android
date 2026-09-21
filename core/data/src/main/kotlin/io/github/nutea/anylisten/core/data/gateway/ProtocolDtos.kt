@@ -24,6 +24,12 @@ object ProtocolDtos {
         encodeDefaults = true
     }
 
+    fun lyricsFrom(info: JsonObject?): io.github.nutea.anylisten.core.model.Lyrics {
+        return io.github.nutea.anylisten.core.model.LrcParser.parse(
+            info?.string("lyric"), info?.string("tlyric"), info?.string("rlyric"), info?.string("awlyric"),
+        )
+    }
+
     fun trackFrom(profileId: String, playlistId: String?, obj: JsonObject): Track {
         val id = obj.string("id").orEmpty()
         val meta = obj["meta"]?.jsonObject

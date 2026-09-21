@@ -17,7 +17,7 @@ interface LibraryDao {
             WHEN 'love' THEN 1
             WHEN 'last_played' THEN 2
             ELSE 3
-        END, name
+        END, position, name
         """,
     )
     fun observePlaylists(): Flow<List<PlaylistEntity>>
@@ -30,7 +30,7 @@ interface LibraryDao {
             WHEN 'love' THEN 1
             WHEN 'last_played' THEN 2
             ELSE 3
-        END, name
+        END, position, name
         """,
     )
     suspend fun playlists(): List<PlaylistEntity>

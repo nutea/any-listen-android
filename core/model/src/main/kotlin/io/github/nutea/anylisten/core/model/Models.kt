@@ -53,15 +53,36 @@ data class PlaylistEntry(
     val position: Int,
 )
 
+data class LyricWord(
+    val text: String,
+    val startTimeMs: Long,
+    val durationMs: Long,
+) {
+    fun progressAt(positionMs: Long): Float = when {
+        positionMs < startTimeMs -> 0f
+        durationMs <= 0 -> 1f
+        else -> ((positionMs - startTimeMs).toDouble() / durationMs).coerceIn(0.0, 1.0).toFloat()
+    }
+}
+
 data class LyricLine(
     val timeMs: Long,
     val text: String,
+    val translation: String? = null,
+    val romanization: String? = null,
+    val words: List<LyricWord> = emptyList(),
 )
 
 data class Lyrics(
     val lines: List<LyricLine>,
     val raw: String,
+    val translationRaw: String = "",
+    val romanizationRaw: String = "",
+    val karaokeRaw: String = "",
+    val karaokeLines: List<LyricLine> = emptyList(),
 ) {
+    fun displayLines(karaoke: Boolean): List<LyricLine> = if (karaoke && karaokeLines.isNotEmpty()) karaokeLines else lines
+
     fun lineAt(positionMs: Long): String? {
         if (lines.isEmpty()) return null
         return lines.lastOrNull { it.timeMs <= positionMs }?.text?.takeIf { it.isNotBlank() }

@@ -21,6 +21,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import io.github.nutea.anylisten.core.model.MusicCatalog
+import io.github.nutea.anylisten.ui.screens.CatalogIndexContent
+import io.github.nutea.anylisten.ui.screens.CatalogDetailContent
+import io.github.nutea.anylisten.ui.screens.downloadedTrackKeys
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -70,6 +75,8 @@ fun AnyListenRoot(
     val player by vm.player.collectAsState()
     val library by vm.library.collectAsState()
     val requestedSheet by vm.playerSheet.collectAsState()
+    val catalog by vm.catalog.collectAsState()
+    val downloadedKeys = downloadedTrackKeys(vm)
     val motion = rememberMotionEnabled()
     val hapticView = LocalView.current
     if (requestedSheet == "queue" && route != "player") {
@@ -92,7 +99,7 @@ fun AnyListenRoot(
                         "settings" to (R.string.nav_settings to Icons.Filled.Settings),
                     ).forEach { (target, spec) ->
                         NavigationBarItem(
-                            selected = route == target || (target == "library" && (route == "search" || route?.startsWith("playlist/") == true)),
+                            selected = route == target || (target == "library" && (route == "search" || route?.startsWith("playlist/") == true || isCatalogRoute(route))),
                             onClick = {
                                 nav.selectMainTab(target)
                             },
@@ -111,7 +118,9 @@ fun AnyListenRoot(
                         vm.openPlaylist(playlist)
                         nav.navigate("playlist/${android.net.Uri.encode(playlist.id)}") { launchSingleTop = true }
                     }
-                }, { if (nav.acceptsInput(entry)) nav.navigate("search") { launchSingleTop = true } })
+                }, { if (nav.acceptsInput(entry)) nav.navigate("search") { launchSingleTop = true } },
+                    onArtists = { if (nav.acceptsInput(entry)) nav.navigate("catalog/artists") },
+                    onAlbums = { if (nav.acceptsInput(entry)) nav.navigate("catalog/albums") })
             }
             libraryPage("playlist/{playlistId}") { entry ->
                 val id = entry.arguments?.getString("playlistId")
@@ -134,6 +143,31 @@ fun AnyListenRoot(
             libraryPage("search") {
                 LibrarySearchScreen(vm, { nav.popBackStack() }, { nav.navigate("player") })
             }
+            libraryPage("catalog/{kind}") { entry ->
+                CatalogIndexContent(catalog, entry.arguments?.getString("kind") == "artists", vm::artworkUrl,
+                    onBack = { if (nav.acceptsInput(entry)) nav.popBackStack() },
+                    onArtist = { if (nav.acceptsInput(entry)) nav.navigate(artistRoute(it)) },
+                    onAlbum = { if (nav.acceptsInput(entry)) nav.navigate(albumRoute(it)) })
+            }
+            listOf("artist/{server}/{name}", "album/{server}/{artist}/{name}").forEach { destination ->
+                libraryPage(destination) { entry ->
+                    val server = entry.arguments?.getString("server").orEmpty()
+                    val name = entry.arguments?.getString("name").orEmpty()
+                    val isArtist = destination.startsWith("artist/")
+                    CatalogDetailContent(
+                        artist = if (isArtist) catalog.artist(MusicCatalog.ArtistKey(server, name)) else null,
+                        album = if (!isArtist) catalog.album(MusicCatalog.AlbumKey(server, entry.arguments?.getString("artist").orEmpty().trim(), name)) else null,
+                        artwork = vm::artworkUrl, currentKey = player.track?.cacheKey, isPlaying = player.isPlaying,
+                        artistPage = isArtist, error = library.error,
+                        offline = library.snapshot.offline, downloaded = { it.cacheKey in downloadedKeys }, availableOffline = vm::isAvailableOffline,
+                        onBack = { if (nav.acceptsInput(entry)) nav.popBackStack() },
+                        onArtist = { if (nav.acceptsInput(entry)) nav.navigate(artistRoute(it)) { launchSingleTop = true } },
+                        onAlbum = { if (nav.acceptsInput(entry)) nav.navigate(albumRoute(it)) { launchSingleTop = true } },
+                        onPlay = { tracks, start -> if (nav.acceptsInput(entry)) vm.play(tracks, start) },
+                        onDownload = { tracks -> if (nav.acceptsInput(entry)) vm.requestDownload(tracks) },
+                    )
+                }
+            }
             libraryPage("downloads") { DownloadsScreen(vm) { nav.navigate("player") } }
             libraryPage("settings") { SettingsScreen(vm) }
             composable(
@@ -142,7 +176,11 @@ fun AnyListenRoot(
                 exitTransition = { playerExit(motion) },
                 popEnterTransition = { if (motion) fadeIn() else androidx.compose.animation.EnterTransition.None },
                 popExitTransition = { playerExit(motion) },
-            ) { androidx.compose.material3.Surface(Modifier.fillMaxSize()) { PlayerScreen(vm) { nav.popBackStack() } } }
+            ) { entry -> androidx.compose.material3.Surface(Modifier.fillMaxSize()) {
+                PlayerScreen(vm, onBack = { nav.popBackStack() },
+                    onArtist = { track -> if (nav.acceptsInput(entry)) MusicCatalog.artistKey(track)?.let { nav.navigate(artistRoute(it)) } },
+                    onAlbum = { track -> if (nav.acceptsInput(entry)) MusicCatalog.albumKey(track)?.let { nav.navigate(albumRoute(it)) } })
+            } }
         }
     }
     OperationNotice(library.status, vm::acknowledgeStatus, Modifier.align(androidx.compose.ui.Alignment.TopCenter))

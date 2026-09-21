@@ -177,7 +177,7 @@ class SessionConnectionManager(
      * handover: the resolve waits for the new session rather than throwing "socket not connected"
      * and killing the load.
      */
-    suspend fun <T> withChannel(waitMs: Long = CALL_WAIT_MS, block: suspend (Message2Call) -> T): T {
+    suspend fun <T> withChannel(waitMs: Long = CALL_WAIT_MS, retryOnDisconnect: Boolean = true, block: suspend (Message2Call) -> T): T {
         var attempt = 0
         // One budget for the whole call, retry included, so a resolve on a Media3 loading thread
         // cannot block for a multiple of the wait window.
@@ -190,12 +190,12 @@ class SessionConnectionManager(
                 throw call
             } catch (timeout: IpcTimeoutException) {
                 report(channel.generation, ConnectionFault.STALE)
-                if (++attempt >= MAX_CALL_ATTEMPTS) {
+                if (!retryOnDisconnect || ++attempt >= MAX_CALL_ATTEMPTS) {
                     throw AppError(ErrorKind.NETWORK_UNREACHABLE, "Server did not answer", retryable = true)
                 }
             } catch (closed: IpcClosedException) {
                 report(channel.generation, ConnectionFault.TRANSPORT)
-                if (++attempt >= MAX_CALL_ATTEMPTS) {
+                if (!retryOnDisconnect || ++attempt >= MAX_CALL_ATTEMPTS) {
                     throw AppError(ErrorKind.NETWORK_UNREACHABLE, "Server connection lost", retryable = true)
                 }
             } catch (cancelled: CancellationException) {

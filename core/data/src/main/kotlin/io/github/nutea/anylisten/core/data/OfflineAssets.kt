@@ -185,8 +185,10 @@ class OfflineAssets(
         writeCatalog(readCatalog().filter { it.cacheKey != cacheKey })
     }
 
-    fun cachedLyrics(track: Track): Lyrics? = file(track.cacheKey,".lrc").takeIf { it.isFile && it.length() > 0 }
-        ?.let { runCatching { LrcParser.parse(it.readText()) }.getOrNull() }
+    fun cachedLyrics(track: Track): Lyrics? = file(track.cacheKey, ".lrc").takeIf { it.isFile && it.length() > 0 }?.let {
+        fun extra(suffix: String) = runCatching { file(track.cacheKey, suffix).readText() }.getOrNull()
+        runCatching { LrcParser.parse(it.readText(), extra(".tlrc"), extra(".rlrc"), extra(".awlrc")) }.getOrNull()
+    }
 
     suspend fun lyrics(track: Track, force: Boolean = false): Lyrics = withContext(Dispatchers.IO) {
         val saved = cachedLyrics(track)
@@ -227,11 +229,11 @@ class OfflineAssets(
         }
         try {
             val fetched = withTimeout(20_000L) { gateway.resolveLyrics(track) }
-            val previous = saved?.toTimedLrc().orEmpty()
+            val previous = saved?.let(::lyricRevision)
             sidecarFailures.remove(track.cacheKey + ".lrc")
             persistLyrics(track.cacheKey,fetched,failed = false)
             writeLyricCheck(track.cacheKey, lyricRevision(fetched))
-            if (previous != fetched.toTimedLrc()) changes.update { it + 1 }
+            if (previous != lyricRevision(fetched)) changes.update { it + 1 }
             fetched
         } catch (cancelled: CancellationException) {
             if (cancelled is TimeoutCancellationException) {
@@ -248,8 +250,8 @@ class OfflineAssets(
     }
 
     private fun lyricRevision(lyrics: Lyrics): String {
-        val text = lyrics.toTimedLrc()
-        return if (text.isBlank()) "none" else key(text)
+        val parts = listOf(lyrics.toTimedLrc(), lyrics.translationRaw, lyrics.romanizationRaw, lyrics.karaokeRaw)
+        return if (parts.all { it.isBlank() }) "none" else key(parts.joinToString("\u0000"))
     }
 
     private fun readLyricCheck(cacheKey: String): Pair<Long, String> {
@@ -346,7 +348,7 @@ class OfflineAssets(
         synchronized(coverJobs) { coverJobs.remove(cacheKey) }?.cancelAndJoin()
         lock(audioLocks,cacheKey).withLock { lock(lyricLocks,cacheKey).withLock { lock(coverLocks,cacheKey).withLock {
         downloader.revalidator.remove(file(cacheKey,".audio"))
-        listOf(".audio", ".audio.part", ".audio.http.json", ".stream.part", ".stream.ranges", ".lrc.checked", ".cover.checked", ".cover.source", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
+        listOf(".audio", ".audio.part", ".audio.http.json", ".stream.part", ".stream.ranges", ".rlrc", ".awlrc", ".tlrc", ".lrc.checked", ".cover.checked", ".cover.source", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
             .forEach { file(cacheKey, it).delete() }
         coverUrls.remove(cacheKey)
         sidecarFailures.remove(cacheKey + ".lrc")
@@ -376,12 +378,16 @@ class OfflineAssets(
             failed -> writeMarker(cacheKey, ".lrc.fail", keepReady = ".lrc")
             lyrics.hasContent() -> {
                 writeAtomic(file(cacheKey, ".lrc"), lyrics!!.toTimedLrc())
+                for ((suffix, raw) in listOf(".tlrc" to lyrics.translationRaw, ".rlrc" to lyrics.romanizationRaw, ".awlrc" to lyrics.karaokeRaw)) {
+                    if (raw.isNotBlank()) writeAtomic(file(cacheKey, suffix), raw) else file(cacheKey, suffix).delete()
+                }
                 file(cacheKey, ".lrc.none").delete()
                 file(cacheKey, ".lrc.fail").delete()
             }
             else -> {
                 writeAtomic(file(cacheKey, ".lrc.none"), "")
                 file(cacheKey, ".lrc").delete()
+                listOf(".tlrc", ".rlrc", ".awlrc").forEach { file(cacheKey, it).delete() }
                 file(cacheKey, ".lrc.fail").delete()
             }
         }
@@ -500,6 +506,6 @@ class OfflineAssets(
     }
 
     private companion object {
-        val RESOURCE_SUFFIXES = listOf(".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
+        val RESOURCE_SUFFIXES = listOf(".rlrc", ".awlrc", ".tlrc", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
     }
 }

@@ -177,3 +177,35 @@ https://<base>/api/p_url/<name>
 依据：上游 `packages/web-server/src/app/renderer/winMain/rendererEvent/list.ts` 和 `packages/shared/types/types/list_ipc.d.ts`。
 
 推送初始化 `inited` 必须在 10 秒内成功应答，否则连接关闭并进入重连退避；无返回值的成功 RESPONSE 也算成功。回到前台时，距上次完整校对至少 60 秒才补查；持续连接期间每 5 分钟检查是否需要完整校对。离线不发起校对；局部同步不延后完整校对期限，避免长期漏通知。校对结果不变时不重写音乐库，避免无意义的 UI 更新。
+
+
+### Android 普通歌单管理
+
+客户端通过 `listAction` 使用 `list_create`、`list_update`、`list_remove`、`list_update_position`。
+创建提交完整 general 列表元数据及客户端生成的稳定 UUID；改名先读取最新列表并保留未知字段；
+删除提交 ID 数组；排序使用同一父级内移除目标后的插入下标。内置列表与非 general 来源列表不接受管理操作。
+写入禁用连接层自动重放，完成后读回确认；应答丢失时也先读回，避免重复创建或重复移动。
+
+歌词读取保留 `lyric` 与 `tlyric`，按时间戳匹配，不按行号拼接。翻译单独保存为 `.tlrc`，
+与原歌词共同参与更新检测。客户端时间偏移属于本机每首歌曲的偏好，不发送服务端歌词写入命令。
+
+
+### 罗马音和逐字歌词
+
+`getMusicLyric.info` 的 `rlyric` 为罗马音，`awlyric` 为 Any Listen AWLRC。
+逐字格式为 `[mm:ss.xxx]<offsetMs,durationMs>文本`，两个数字分别表示相对本句起点的偏移与持续时间，单位毫秒。
+客户端保留普通 LRC 与 AWLRC 两条时间轴；逐字开关开启时使用 AWLRC，关闭时使用普通 LRC。
+罗马音和翻译均按所显示行的时间戳匹配，缺失行不按行号错配。无有效逐字时间时回退普通歌词。
+
+本地 `.rlrc`、`.awlrc` 与 `.tlrc` 一并参与缓存更新检测、资源统计及删除；旧 `.lrc` 缓存保持兼容。
+渲染只在歌词页可见、应用处于前台且播放器实际播放时插值；依据 Media3 的位置、采样时刻和速度计算，
+最多外推 500 ms，暂停、缓冲、跳转后按新采样校正。原始逐字时间不受本地偏移设置改写。
+
+格式依据：匹配部署版本的 `packages/shared/web/lyric-font-player/font-player.js`（解析 `<offset,duration>`）
+以及 `index.js`（以播放位置减行起点驱动 FontPlayer），提交 `e4ef53a5094473687e2d142fb7b63a530436b982`。
+
+### Song comments
+
+`getResourceList().resources.musicComment` supplies `(id, extensionId, name)` sources. The Android player prefers the track's original source. Same-source online music retains its full protocol object; local/cross-source tracks use `findMusic({extensionId, source, name, artist, albumName, interval, strict:false})` and retain the returned online metadata.
+
+Read-only `musicComment({extensionId, source, musicInfo, type:"hot"|"new", page, limit:20})` returns `{list,total,page,limit}`. Comment fields include `id,userName,text,time,location,likedCount,avatar,images,reply`. Recursive replies are bounded to three levels; HTTPS images use the existing image loader. Compose cancels requests when the sheet closes, song changes, source changes, or pagination/sort changes. Comments are not persisted offline. The implementation follows the deployed Web v0.11.0-beta.1 resource IPC contract.
