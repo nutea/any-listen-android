@@ -159,9 +159,14 @@ class OfflineAssetsTest {
             override suspend fun resolveLyrics(track: Track): Lyrics { calls++; return LrcParser.parse(text) }
         }
         val http = OkHttpClient()
-        val assets = OfflineAssets(
+        lateinit var assets: OfflineAssets
+        assets = OfflineAssets(
             temp.newFolder(), gateway, FileDownloader(http), ArtworkStore(temp.newFolder(), http),
-            { clock }, { "https://example.test" },
+            {
+                // Make the file-visible / notification-pending window deterministic.
+                if (clock > 1_000_000L && assets.cachedLyrics(track)?.lineAt(1000) == "Updated on server") Thread.sleep(150)
+                clock
+            }, { "https://example.test" },
         )
         assertEquals("Original", assets.lyrics(track).lineAt(1000))
         assertEquals(1, calls)
@@ -174,7 +179,7 @@ class OfflineAssetsTest {
         val notified = assets.updates.value
         assertEquals("Original", assets.lyrics(track).lineAt(1000))
         withTimeout(5_000) {
-            while (assets.cachedLyrics(track)?.lineAt(1000) != "Updated on server") delay(10)
+            assets.updates.first { it > notified }
         }
         assertEquals("Updated on server", assets.cachedLyrics(track)!!.lineAt(1000))
         assertTrue(assets.updates.value > notified)

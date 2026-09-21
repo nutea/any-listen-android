@@ -119,3 +119,9 @@ keyPassword=...
 - versionName: 0.1.4-beta.1；versionCode: 11；正式包名及现有签名密钥不变。
 - 歌单管理、多种歌词、评论、歌手与专辑页面，见 [发布说明](RELEASE_NOTES_0.1.4-beta.1.md)。
 - 发布前审查与验证见 [审查记录](REVIEW_0.1.4-beta.1.md)；本轮设备测试使用 Android 16 ARM64 模拟器。
+
+## 测试版 v0.1.4-beta.2
+
+- versionName: 0.1.4-beta.2；versionCode: 12；沿用现有签名密钥。
+- beta.1 因 CI 异步测试时序断言失败未发布 APK，保留标签不重打。
+- 修复歌词刷新测试的同步条件，功能范围与 beta.1 相同；见 [发布说明](RELEASE_NOTES_0.1.4-beta.2.md) 和 [审查记录](REVIEW_0.1.4-beta.1.md)。
