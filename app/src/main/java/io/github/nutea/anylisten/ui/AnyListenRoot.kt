@@ -22,6 +22,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material3.ScaffoldDefaults
+import io.github.nutea.anylisten.core.model.PlayerStyle
 import io.github.nutea.anylisten.core.model.MusicCatalog
 import io.github.nutea.anylisten.ui.screens.CatalogIndexContent
 import io.github.nutea.anylisten.ui.screens.CatalogDetailContent
@@ -63,6 +67,7 @@ fun AnyListenRoot(
         }
     }
     if (!signedIn) {
+        SystemBarAppearance(immersive = false)
         val connect by vm.connect.collectAsState()
         ConnectScreen(connect, vm::updateUrl, vm::updatePassword, vm::testHello, vm::login)
         return
@@ -72,6 +77,9 @@ fun AnyListenRoot(
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
+    val playerStyle by vm.playerStyle.collectAsState()
+    val immersivePlayer = route == "player" && playerStyle.isDarkPlayer
+    SystemBarAppearance(immersivePlayer)
     val player by vm.player.collectAsState()
     val library by vm.library.collectAsState()
     val requestedSheet by vm.playerSheet.collectAsState()
@@ -84,6 +92,7 @@ fun AnyListenRoot(
     }
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
     Scaffold(
+        contentWindowInsets = if (immersivePlayer) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         bottomBar = {
             if (route != "player") Column {
                 if (player.track != null && route != "player") {
@@ -186,6 +195,22 @@ fun AnyListenRoot(
     OperationNotice(library.status, vm::acknowledgeStatus, Modifier.align(androidx.compose.ui.Alignment.TopCenter))
     }
 
+}
+
+@Composable
+private fun SystemBarAppearance(immersive: Boolean) {
+    val dark = io.github.nutea.anylisten.ui.theme.LocalDarkTheme.current
+    val view = LocalView.current
+    DisposableEffect(immersive, dark, view) {
+        val window = (view.context as? android.app.Activity)?.window
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+        controller?.isAppearanceLightStatusBars = !dark && !immersive
+        controller?.isAppearanceLightNavigationBars = !dark && !immersive
+        onDispose {
+            controller?.isAppearanceLightStatusBars = !dark
+            controller?.isAppearanceLightNavigationBars = !dark
+        }
+    }
 }
 
 @Composable

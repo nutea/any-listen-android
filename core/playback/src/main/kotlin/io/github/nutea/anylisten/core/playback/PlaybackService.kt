@@ -141,7 +141,7 @@ class PlaybackService : MediaSessionService() {
             }
             spec.buildUpon().setUri(android.net.Uri.parse(resource.url)).setKey(resolver.cacheKey(track,resource)).setCustomData(track).build()
         }
-        val exo = ExoPlayer.Builder(this)
+        val exo = ExoPlayer.Builder(this, AudioWaveRenderersFactory(this))
             .setLoadControl(streamingLoadControl())
             .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingFactory))
             .setAudioAttributes(
@@ -231,6 +231,7 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onDestroy() {
+        AudioWaveSignal.reset()
         val finalState = snapshot()
         if (finalState != null) runBlocking {
             (application as ContainerHolder).container.settings.setPlayback(finalState)

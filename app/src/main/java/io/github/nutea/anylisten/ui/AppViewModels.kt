@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import io.github.nutea.anylisten.core.model.PlayerStyle
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -146,6 +147,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val storage: StateFlow<StorageSummary> = _storage.asStateFlow()
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+    val playerStyle = container.settings.playerStyle.stateIn(viewModelScope,
+        kotlinx.coroutines.flow.SharingStarted.Eagerly, PlayerStyle.CLASSIC)
     private val _autoCacheAudio = MutableStateFlow(true)
     val autoCacheAudio: StateFlow<Boolean> = _autoCacheAudio.asStateFlow()
     private val _signedIn = MutableStateFlow(false)
@@ -720,6 +723,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeDownloads() = safeLaunch { container.downloads.resumePaused(); container.refreshCachedResources() }
 
     fun setThemeMode(value: ThemeMode) = safeLaunch { container.settings.setThemeMode(value) }
+    fun setPlayerStyle(value: PlayerStyle) = safeLaunch { container.settings.setPlayerStyle(value) }
 
     fun setAutoCacheAudio(value: Boolean) = safeLaunch {
         container.settings.setAutoCacheAudio(value)

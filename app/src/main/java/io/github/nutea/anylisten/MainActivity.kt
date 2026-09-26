@@ -2,7 +2,6 @@ package io.github.nutea.anylisten
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.*
-import androidx.core.view.WindowCompat
 import io.github.nutea.anylisten.core.model.ThemeMode
 import android.content.Intent
 import android.os.Bundle
@@ -20,12 +19,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by app.container.settings.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
             val dark = themeMode.isDark(isSystemInDarkTheme())
-            SideEffect {
-                WindowCompat.getInsetsController(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = !dark
-                    isAppearanceLightNavigationBars = !dark
-                }
-            }
             AnyListenTheme(darkTheme = dark) {
                 AnyListenRoot(app.container, playLast = wantsPlayLast(intent))
             }

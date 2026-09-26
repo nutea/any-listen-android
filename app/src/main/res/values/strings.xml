@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="player_style_dust">Cosmic dust</string>
+    <string name="player_style_dust_detail">A shimmering halo of fine particles</string>
+    <string name="player_style_particles">Pulse particles</string>
+    <string name="player_style_particles_detail">A dotted ring pulsing with the music</string>
+    <string name="player_style_crystal">Crystal waves</string>
+    <string name="player_style_crystal_detail">Angular waves and floating crystal shards</string>
+    <string name="player_style">Player appearance</string>
+    <string name="player_style_classic">Classic</string>
+    <string name="player_style_classic_detail">Framed artwork with a soft background</string>
+    <string name="player_style_immersive">Immersive artwork</string>
+    <string name="player_style_immersive_detail">Full-width artwork fading into its colors</string>
     <string name="app_name">Any Listen</string>
     <string name="connect_title">Connect</string>
     <string name="connect_url">HTTPS server URL</string>

@@ -1,6 +1,7 @@
 package io.github.nutea.anylisten.core.data.session
 
 import io.github.nutea.anylisten.core.model.ThemeMode
+import io.github.nutea.anylisten.core.model.PlayerStyle
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -13,11 +14,13 @@ private val Context.settingsDataStore by preferencesDataStore("settings")
 
 class AppSettingsStore(private val context: Context) {
     val themeMode: Flow<ThemeMode> = context.settingsDataStore.data.map { ThemeMode.decode(it[THEME_MODE]) }
+    val playerStyle: Flow<PlayerStyle> = context.settingsDataStore.data.map { PlayerStyle.decode(it[PLAYER_STYLE]) }
     val autoCacheAudio: Flow<Boolean> = context.settingsDataStore.data.map { it[AUTO_CACHE_AUDIO] ?: true }
     val lyricSettings: Flow<LyricSettings> = context.settingsDataStore.data.map { LyricSettings.decode(it[LYRICS]) }
     val playback: Flow<PersistedPlayback> = context.settingsDataStore.data.map { PersistedPlayback.decode(it[PLAYBACK]) }
 
     suspend fun setThemeMode(value: ThemeMode) { context.settingsDataStore.edit { it[THEME_MODE] = value.name } }
+    suspend fun setPlayerStyle(value: PlayerStyle) { context.settingsDataStore.edit { it[PLAYER_STYLE] = value.name } }
 
     suspend fun setAutoCacheAudio(value: Boolean) {
         context.settingsDataStore.edit { it[AUTO_CACHE_AUDIO] = value }
@@ -58,6 +61,7 @@ class AppSettingsStore(private val context: Context) {
     private companion object {
         val LYRICS = stringPreferencesKey("lyric_settings")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val PLAYER_STYLE = stringPreferencesKey("player_style")
         val AUTO_CACHE_AUDIO = booleanPreferencesKey("auto_cache_audio")
         val PLAYBACK = stringPreferencesKey("playback_queue")
     }

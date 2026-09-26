@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="player_style_dust">音波 · 宇宙尘埃</string>
+    <string name="player_style_dust_detail">细密星尘，随旋律闪烁流动</string>
+    <string name="player_style_particles">音波 · 爆炸粒子</string>
+    <string name="player_style_particles_detail">环形光点，随音乐强弱向外扩散</string>
+    <string name="player_style_crystal">音波 · 水晶音波</string>
+    <string name="player_style_crystal_detail">折线波纹与漂浮的水晶碎片</string>
+    <string name="player_style">播放页风格</string>
+    <string name="player_style_classic">经典</string>
+    <string name="player_style_classic_detail">方形封面 · 柔和纯色背景</string>
+    <string name="player_style_immersive">沉浸封面</string>
+    <string name="player_style_immersive_detail">全幅封面 · 随封面取色渐隐</string>
     <string name="app_name">Any Listen</string>
     <string name="connect_title">连接服务器</string>
     <string name="connect_url">HTTPS 地址</string>

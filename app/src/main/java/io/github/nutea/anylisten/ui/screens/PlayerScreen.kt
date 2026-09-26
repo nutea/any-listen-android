@@ -58,11 +58,13 @@ data class PlayerActions(
     val romanization: (Boolean) -> Unit = {}, val karaoke: (Boolean) -> Unit = {},
     val comments: () -> Unit = {},
     val artist: () -> Unit = {}, val album: () -> Unit = {},
+    val style: (PlayerStyle) -> Unit = {},
 )
 
 @Composable
 fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit, onArtist: (Track) -> Unit = {}, onAlbum: (Track) -> Unit = {}) {
     val state by vm.player.collectAsState()
+    val style by vm.playerStyle.collectAsState()
     var showComments by remember { mutableStateOf(false) }
     if (showComments) state.track?.let { CommentsSheet(it, vm.musicComments) { showComments = false } }
     val library by vm.library.collectAsState()
@@ -75,9 +77,9 @@ fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit, onArtist: (Track) -> Unit
             more = { state.track?.let(vm::startAddToPlaylist) },
             translation = vm::setShowTranslation, lyricOffset = vm::setLyricOffset,
             romanization = vm::setShowRomanization, karaoke = vm::setKaraokeEnabled, comments = { showComments = true },
-            artist = { state.track?.let(onArtist) }, album = { state.track?.let(onAlbum) }),
+            artist = { state.track?.let(onArtist) }, album = { state.track?.let(onAlbum) }, style = vm::setPlayerStyle),
         source = library.selected?.let { playlistName(it) }, startSheet = requested,
-        onSheetConsumed = vm::consumePlayerSheet, downloaded = state.track?.cacheKey in downloadedKeys)
+        onSheetConsumed = vm::consumePlayerSheet, downloaded = state.track?.cacheKey in downloadedKeys, style = style)
 
 }
 
@@ -87,6 +89,7 @@ fun PlayerContent(
     state: PlayerUiState, artwork: (Track?) -> String?, favorite: Boolean, offline: Boolean, actions: PlayerActions,
     source: String? = null, startSheet: String? = null, onSheetConsumed: () -> Unit = {},
     downloaded: Boolean = false,
+    style: PlayerStyle = PlayerStyle.CLASSIC,
 ) {
     var sheet by remember { mutableStateOf<String?>(null) }
     val pager = rememberPagerState(pageCount = { 2 })
@@ -109,8 +112,25 @@ fun PlayerContent(
     val track = state.track
     val mode = PlaybackMode.from(state.repeat, state.shuffled)
     val cover = artwork(track)
-    val accent = rememberCoverAccent(cover, io.github.nutea.anylisten.ui.theme.LocalDarkTheme.current)
-    Column(Modifier.fillMaxSize().background(accent).padding(horizontal = 20.dp, vertical = 8.dp)) {
+    val immersive = style.isDarkPlayer
+    val accent = if (!immersive) rememberCoverAccent(cover, io.github.nutea.anylisten.ui.theme.LocalDarkTheme.current) else Color.Transparent
+    val image = if (immersive) key(cover) { rememberArtwork(cover) } else null
+    var artworkFailed by remember(image) { mutableStateOf(false) }
+    val palette = if (immersive) rememberPlayerPalette(image) else PlayerPalette.Fallback
+    val colors = if (immersive) darkColorScheme(
+        primary = Color(0xFFF5ECE7), onPrimary = palette.bottom,
+        onSurface = Color(0xFFF5ECE7), onSurfaceVariant = Color(0xFFCCC1BC),
+        surface = palette.bottom, surfaceContainer = palette.top,
+        secondary = Color(0xFFD9CBC4), outline = Color(0xFFAA9991),
+    ) else MaterialTheme.colorScheme
+    MaterialTheme(colorScheme = colors) {
+    CompositionLocalProvider(LocalContentColor provides colors.onSurface) {
+    Box(Modifier.fillMaxSize().background(if (immersive) palette.bottom else accent)) {
+    if (style == PlayerStyle.IMMERSIVE) PlayerBackdrop(image, palette, pager.currentPage == 1) { artworkFailed = it }
+    else if (style.hasWave) Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+        listOf(palette.bottom, palette.top, Color(0xFF101019)))))
+    Column(Modifier.fillMaxSize().then(if (immersive) Modifier.safeDrawingPadding() else Modifier)
+        .padding(horizontal = 20.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = actions.back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back_to_library)) }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center) {
@@ -128,7 +148,9 @@ fun PlayerContent(
             }
             if (pager.currentPage == 1 && track != null) IconButton(onClick = { sheet = "lyrics" }) {
                 Icon(Icons.Default.Tune, stringResource(R.string.lyric_settings))
-            } else Spacer(Modifier.size(48.dp))
+            } else IconButton(onClick = { sheet = "style" }) {
+                Icon(Icons.Default.Palette, stringResource(R.string.player_style))
+            }
         }
         if (track == null) {
             EmptyContent(Icons.Default.MusicNote, stringResource(R.string.player_empty), stringResource(R.string.player_empty_detail),
@@ -140,7 +162,13 @@ fun PlayerContent(
                     Column(Modifier.fillMaxSize().testTag("cover_page")) {
                         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             val edge = minOf(maxWidth, maxHeight * .88f, 360.dp)
-                            Artwork(cover, Modifier.size(edge), seed = track.album.ifBlank { track.title }, radius = 20.dp)
+                            if (!immersive) Artwork(cover, Modifier.size(edge), seed = track.album.ifBlank { track.title }, radius = 20.dp)
+                            else if (style.hasWave) AudioWaveArtwork(image, style, palette,
+                                active = motion && state.isPlaying && !state.isBuffering && pager.currentPage == 0,
+                                modifier = Modifier.size(minOf(maxWidth, maxHeight, 420.dp)))
+                            else if (image == null || artworkFailed) Icon(Icons.Default.MusicNote, null,
+                                Modifier.size(96.dp).testTag("immersive_artwork_placeholder"),
+                                tint = Color.White.copy(alpha = .12f))
                         }
                         val lines = state.lyrics?.displayLines(state.karaokeEnabled).orEmpty()
                         val lyricIndex = lines.indexOfLast { it.timeMs <= LyricTiming.position(state.positionMs, state.lyricOffsetMs) }
@@ -201,7 +229,9 @@ fun PlayerContent(
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { sheet = "mode" }) { Icon(modeIcon(mode), stringResource(modeLabel(mode)), tint = MaterialTheme.colorScheme.primary) }
                 IconButton(onClick = actions.previous, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.SkipPrevious, stringResource(R.string.cd_previous), Modifier.size(32.dp)) }
-                FilledIconButton(onClick = actions.toggle, modifier = Modifier.size(68.dp)) {
+                if (immersive) IconButton(onClick = actions.toggle, modifier = Modifier.size(68.dp)) {
+                    PlaybackToggleGlyph(state, large = true)
+                } else FilledIconButton(onClick = actions.toggle, modifier = Modifier.size(68.dp)) {
                     PlaybackToggleGlyph(state, large = true)
                 }
                 IconButton(onClick = actions.next, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.SkipNext, stringResource(R.string.cd_next), Modifier.size(32.dp)) }
@@ -211,9 +241,35 @@ fun PlayerContent(
             }
         }
     }
+    }
+    }
+    }
     sheet?.let { showing ->
         ModalBottomSheet(onDismissRequest = { sheet = null }, containerColor = MaterialTheme.colorScheme.surfaceContainer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             when (showing) {
+                "style" -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(stringResource(R.string.player_style), style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
+                    PlayerStyle.entries.forEach { option ->
+                        val selected = option == style
+                        Row(Modifier.fillMaxWidth().clickable { actions.style(option); sheet = null }
+                            .testTag("player_style_${option.name}").padding(horizontal = 24.dp, vertical = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Icon(when { option.hasWave -> Icons.Default.GraphicEq
+                                option == PlayerStyle.CLASSIC -> Icons.Default.CropSquare
+                                else -> Icons.Default.Gradient }, null)
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(playerStyleName(option)),
+                                    style = MaterialTheme.typography.titleMedium)
+                                Text(stringResource(playerStyleDetail(option)),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp))
+                            }
+                            RadioButton(selected, onClick = null)
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                }
                 "mode" -> {
                     Text(stringResource(R.string.choose_play_mode), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
                     PlaybackMode.entries.forEach { option ->
