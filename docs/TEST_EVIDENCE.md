@@ -310,3 +310,12 @@ DownloadRecoveryTest 与 OfflineAssetsTest 共 9 项通过，设置页回归 1 �
 - Debug、AndroidTest、Release 构建和 Debug／Release Lint 通过，无 Lint 错误。用户指南和第三方许可记录已更新；本轮生成第二批本地调试预览 APK，未改动版本号、提交或发布标签。
 
 截图：`captures/private/second-batch-20261001/ui-review/`、`ui-review-small-dark/`（Git 忽略）；纯表单截图使用 Compose 测试容器，歌词等模态页面使用实际组件，均为测试曲名和本地夹具，不含服务器地址或凭据。
+
+## 2026-10-01：v0.1.4-beta.4 发布前回归
+
+- versionName 0.1.4-beta.4／versionCode 14。相对 beta.3 纳入上述两批功能，继续使用现有 CI 签名流程；没有轮换密钥。
+- 升级版本号后重新完成 254 项单元测试，Debug／AndroidTest／Release 构建、Debug／Release Lint 通过。
+- API 36 模拟器本地夹具回归 44 项通过：第二批 UI、真实音效播放服务、第一批播放工具与小组件、优先及普通队列、五种风格、三种音波、缓冲，另覆盖原有歌单管理、双语／罗马音／逐字歌词、评论及歌手专辑页面。
+- 360dp／130% 字体／深色界面额外 6 项通过。恢复模拟器默认密度、字体、主题及网络。
+- 规范／需求检视见 REVIEW_0.1.4-beta.4.md：无阻止发布的问题；私有配置值未进入跟踪源码，许可证清单为 113 项。
+- 本轮没有真实服务器写入或实体手机验收；不能将模拟器结果泛化为所有设备的音效支持。
