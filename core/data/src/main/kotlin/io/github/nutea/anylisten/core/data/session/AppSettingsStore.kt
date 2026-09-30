@@ -13,6 +13,27 @@ import kotlinx.coroutines.flow.map
 private val Context.settingsDataStore by preferencesDataStore("settings")
 
 class AppSettingsStore(private val context: Context) {
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    val audioEffects: Flow<io.github.nutea.anylisten.core.model.AudioEffectsSettings> = context.settingsDataStore.data.map {
+        runCatching { json.decodeFromString<io.github.nutea.anylisten.core.model.AudioEffectsSettings>(it[AUDIO_EFFECTS].orEmpty()) }
+            .getOrDefault(io.github.nutea.anylisten.core.model.AudioEffectsSettings()).sanitized()
+    }
+    val searchHistory: Flow<List<String>> = context.settingsDataStore.data.map {
+        runCatching { json.decodeFromString<List<String>>(it[SEARCH_HISTORY].orEmpty()) }.getOrDefault(emptyList())
+    }
+    suspend fun setAudioEffects(value: io.github.nutea.anylisten.core.model.AudioEffectsSettings) {
+        context.settingsDataStore.edit { it[AUDIO_EFFECTS] = json.encodeToString(io.github.nutea.anylisten.core.model.AudioEffectsSettings.serializer(), value.sanitized()) }
+    }
+    suspend fun rememberSearch(query: String) {
+        val q = query.trim().take(100)
+        if (q.isBlank()) return
+        context.settingsDataStore.edit { prefs ->
+            val old = runCatching { json.decodeFromString<List<String>>(prefs[SEARCH_HISTORY].orEmpty()) }.getOrDefault(emptyList())
+            prefs[SEARCH_HISTORY] = json.encodeToString(kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>()),
+                (listOf(q) + old.filterNot { it.equals(q, true) }).take(20))
+        }
+    }
+    suspend fun clearSearchHistory() { context.settingsDataStore.edit { it.remove(SEARCH_HISTORY) } }
     val themeMode: Flow<ThemeMode> = context.settingsDataStore.data.map { ThemeMode.decode(it[THEME_MODE]) }
     val playerStyle: Flow<PlayerStyle> = context.settingsDataStore.data.map { PlayerStyle.decode(it[PLAYER_STYLE]) }
     val autoCacheAudio: Flow<Boolean> = context.settingsDataStore.data.map { it[AUTO_CACHE_AUDIO] ?: true }
@@ -59,6 +80,8 @@ class AppSettingsStore(private val context: Context) {
     }
 
     private companion object {
+        val AUDIO_EFFECTS = stringPreferencesKey("audio_effects")
+        val SEARCH_HISTORY = stringPreferencesKey("search_history")
         val LYRICS = stringPreferencesKey("lyric_settings")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val PLAYER_STYLE = stringPreferencesKey("player_style")

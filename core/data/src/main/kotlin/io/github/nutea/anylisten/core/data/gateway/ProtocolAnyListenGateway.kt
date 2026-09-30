@@ -33,6 +33,20 @@ class ProtocolAnyListenGateway(
     private val connection: SessionConnectionManager,
 ) : AnyListenGateway {
 
+    val lyricRepair = LyricRepair(::isOnline) { method, args, retry ->
+        connection.withChannel(retryOnDisconnect = retry) { it.call(listOf(method), args) }
+    }
+    private val playlistTracks = PlaylistTracks(::isOnline,
+        { ProtocolDtos.playlistsFrom(connection.withChannel { it.call(listOf("getAllUserLists")) }!!.jsonObject) },
+        { id -> connection.withChannel { it.call(listOf("getListMusics"), listOf(JsonPrimitive(id))) }?.jsonArray?.map { it.jsonObject }.orEmpty() },
+        { action, data -> connection.withChannel(retryOnDisconnect = false) {
+            it.call(listOf("listAction"), listOf(Message2Call.obj("action" to JsonPrimitive(action), "data" to data)))
+        }; Unit })
+    override suspend fun setPlaylistOrder(listId: String, original: List<String>, ordered: List<String>) = playlistTracks.setOrder(listId, original, ordered)
+    override suspend fun reorderPlaylistTracks(listId: String, fromId: String, toId: String) = playlistTracks.reorder(listId, fromId, toId)
+    override suspend fun movePlaylistTracks(fromId: String, toId: String, ids: List<String>) = playlistTracks.move(fromId, toId, ids)
+    override suspend fun appendPlaylistTracks(listId: String, tracks: List<Track>) = playlistTracks.append(listId, tracks)
+
     val comments = MusicComments { method, args -> connection.withChannel { it.call(listOf(method), args) } }
 
     @Volatile private var lastAddMusicLocationType = AddMusicLocationType.TOP

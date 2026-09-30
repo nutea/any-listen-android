@@ -12,6 +12,7 @@ import io.github.nutea.anylisten.core.model.LibrarySnapshot
 import io.github.nutea.anylisten.core.model.Playlist
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import io.github.nutea.anylisten.core.model.RecentlyPlayed
+import io.github.nutea.anylisten.core.model.canManage
 import io.github.nutea.anylisten.core.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,6 +56,26 @@ class LibraryRepository(
                 it.artist.lowercase().contains(q) ||
                 it.album.lowercase().contains(q)
         }
+    }
+
+    suspend fun setPlaylistOrder(listId: String, original: List<String>, ordered: List<String>) = refreshMutex.withLock {
+        gateway.setPlaylistOrder(listId, original, ordered)
+        persist(gateway.refreshLibrary(cached(), setOf(listId)))
+    }
+    suspend fun reorderPlaylistTracks(listId: String, fromId: String, toId: String) = refreshMutex.withLock {
+        gateway.reorderPlaylistTracks(listId, fromId, toId)
+        persist(gateway.refreshLibrary(cached(), setOf(listId)))
+    }
+    suspend fun movePlaylistTracks(fromId: String, toId: String, tracks: List<Track>) = refreshMutex.withLock {
+        gateway.movePlaylistTracks(fromId, toId, tracks.map { it.identity.remoteTrackId })
+        persist(gateway.refreshLibrary(cached(), setOf(fromId, toId)))
+    }
+    suspend fun copyPlaylist(sourceId: String, newId: String, name: String) = refreshMutex.withLock {
+        val snapshot = gateway.refreshLibrary()
+        require(snapshot.playlists.any { it.id == sourceId && it.canManage })
+        gateway.editPlaylist(io.github.nutea.anylisten.core.model.PlaylistEdit.Create(newId, name))
+        try { gateway.appendPlaylistTracks(newId, snapshot.tracksByPlaylist[sourceId].orEmpty()) }
+        finally { persist(gateway.refreshLibrary()) }
     }
 
     suspend fun editPlaylist(edit: io.github.nutea.anylisten.core.model.PlaylistEdit) {

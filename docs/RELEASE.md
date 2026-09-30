@@ -125,3 +125,10 @@ keyPassword=...
 - versionName: 0.1.4-beta.2；versionCode: 12；沿用现有签名密钥。
 - beta.1 因 CI 异步测试时序断言失败未发布 APK，保留标签不重打。
 - 修复歌词刷新测试的同步条件，功能范围与 beta.1 相同；见 [发布说明](RELEASE_NOTES_0.1.4-beta.2.md) 和 [审查记录](REVIEW_0.1.4-beta.1.md)。
+
+## 测试版 v0.1.4-beta.4
+
+- versionName: 0.1.4-beta.4；versionCode: 14；正式包名及现有 CI 签名密钥不变。
+- 纳入第一批播放工具与第二批曲库功能，见 [发布说明](RELEASE_NOTES_0.1.4-beta.4.md)。
+- 相对 v0.1.4-beta.3 进行规范及需求两路检视，见 [审查记录](REVIEW_0.1.4-beta.4.md)。
+- Room 数据库通过增量迁移升级至版本 3；保留曲库和下载，听歌统计不回填旧数据。

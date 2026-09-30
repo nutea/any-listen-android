@@ -11,4 +11,6 @@ sealed interface PlaylistEdit {
 val Playlist.canManage: Boolean
     get() = type == "general" && id !in setOf("default", "love", "last_played")
 
+fun canManagePlaylist(playlist: Playlist) = playlist.canManage && playlist.canMutateOnline
+
 fun validPlaylistName(name: String): Boolean = name.trim().isNotEmpty() && name.trim().length <= 100

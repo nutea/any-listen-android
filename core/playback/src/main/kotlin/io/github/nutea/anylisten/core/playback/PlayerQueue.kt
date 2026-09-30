@@ -1,6 +1,8 @@
 package io.github.nutea.anylisten.core.playback
 
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ShuffleOrder
 
 /** Edits the actual Media3 timeline, keeping unrelated playback uninterrupted. */
 fun Player.removeQueuedTrack(mediaId: String): Boolean {
@@ -26,4 +28,10 @@ fun Player.playbackOrderKeys(): List<String> {
         index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_ALL, true)
     }
     return indices.map { getMediaItemAt(it).mediaId }
+}
+
+fun ExoPlayer.restorePlaybackOrder(keys: List<String>) {
+    val indices = keys.map { key -> (0 until mediaItemCount).firstOrNull { getMediaItemAt(it).mediaId == key } ?: return }
+    if (indices.size == mediaItemCount && indices.distinct().size == indices.size && indices.isNotEmpty())
+        setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(indices.toIntArray(), 0L))
 }

@@ -91,6 +91,7 @@ Generated from the resolved releaseRuntimeClasspath. Includes transitive artifac
 | androidx.vectordrawable:vectordrawable-animated:1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.vectordrawable:vectordrawable:1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.versionedparcelable:versionedparcelable:1.1.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.github.promeg:tinypinyin:2.0.3 | [Apache License, Version 2.0](https://github.com/promeG/TinyPinyin/blob/c4c65b9c0c82cc8e60ef081e91f3cc66b7829dcc/LICENSE) |
 | com.google.accompanist:accompanist-drawablepainter:0.32.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | com.google.code.gson:gson:2.8.9 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
 | com.google.crypto.tink:tink-android:1.8.0 | [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
@@ -104,6 +105,7 @@ Generated from the resolved releaseRuntimeClasspath. Includes transitive artifac
 | io.coil-kt:coil-compose-base:2.7.0 | [The Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
 | io.coil-kt:coil-compose:2.7.0 | [The Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
 | io.coil-kt:coil:2.7.0 | [The Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.ahocorasick:ahocorasick:0.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-android-extensions-runtime:1.9.22 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-parcelize-runtime:1.9.22 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |

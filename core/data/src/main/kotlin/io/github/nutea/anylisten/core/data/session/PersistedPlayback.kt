@@ -12,6 +12,7 @@ data class PersistedPlayback(
     val repeat: String = RepeatMode.ALL.name,
     val positionMs: Long = 0L,
     val laterKeys: List<String> = emptyList(),
+    val playbackOrder: List<String> = emptyList(),
 ) {
     fun repeatMode(): RepeatMode = runCatching { RepeatMode.valueOf(repeat) }.getOrDefault(RepeatMode.ALL)
 

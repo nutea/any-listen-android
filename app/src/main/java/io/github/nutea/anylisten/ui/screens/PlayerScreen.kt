@@ -57,18 +57,27 @@ data class PlayerActions(
     val translation: (Boolean) -> Unit = {}, val lyricOffset: (Long) -> Unit = {},
     val romanization: (Boolean) -> Unit = {}, val karaoke: (Boolean) -> Unit = {},
     val comments: () -> Unit = {},
+    val repairLyrics: () -> Unit = {},
+    val effects: (io.github.nutea.anylisten.core.model.AudioEffectsSettings) -> Unit = {},
     val artist: () -> Unit = {}, val album: () -> Unit = {},
     val style: (PlayerStyle) -> Unit = {},
+    val queueMove: (String, String) -> Unit = { _, _ -> },
+    val sleepStart: (Long) -> Unit = {}, val sleepAfterTrack: () -> Unit = {}, val sleepCancel: () -> Unit = {},
 )
 
 @Composable
 fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit, onArtist: (Track) -> Unit = {}, onAlbum: (Track) -> Unit = {}) {
     val state by vm.player.collectAsState()
     val style by vm.playerStyle.collectAsState()
+    val effects by vm.effects.collectAsState()
+    val effectsState by vm.effectsState.collectAsState()
+    var repairTrack by remember { mutableStateOf<Track?>(null) }
     var showComments by remember { mutableStateOf(false) }
     if (showComments) state.track?.let { CommentsSheet(it, vm.musicComments) { showComments = false } }
     val library by vm.library.collectAsState()
     val requested by vm.playerSheet.collectAsState()
+    repairTrack?.let { track -> key(track.cacheKey) { LyricRepairSheet(track, LyricRepairActions(vm.lyricRepair, { vm.hasLocalLyrics(track) },
+        { lyrics, server -> vm.applyLyrics(track, lyrics, server) }, { server -> vm.resetLyrics(track, server) }), library.snapshot.offline) { repairTrack = null } } }
     val downloadedKeys = downloadedTrackKeys(vm)
     PlayerContent(state, vm::artworkUrl, state.track?.let { vm.isFavorite(it) } == true, library.snapshot.offline,
         PlayerActions({ vm.cancelAddToPlaylist(); onBack() }, vm::togglePlayPause, vm::skipPrevious, vm::skipNext,
@@ -77,9 +86,11 @@ fun PlayerScreen(vm: AppViewModel, onBack: () -> Unit, onArtist: (Track) -> Unit
             more = { state.track?.let(vm::startAddToPlaylist) },
             translation = vm::setShowTranslation, lyricOffset = vm::setLyricOffset,
             romanization = vm::setShowRomanization, karaoke = vm::setKaraokeEnabled, comments = { showComments = true },
-            artist = { state.track?.let(onArtist) }, album = { state.track?.let(onAlbum) }, style = vm::setPlayerStyle),
+            artist = { state.track?.let(onArtist) }, album = { state.track?.let(onAlbum) }, style = vm::setPlayerStyle,
+            queueMove = vm::moveQueueItem, sleepStart = vm::startSleepTimer, sleepAfterTrack = vm::stopAfterCurrentTrack,
+            sleepCancel = vm::cancelSleepTimer, repairLyrics = { repairTrack = state.track }, effects = vm::setAudioEffects),
         source = library.selected?.let { playlistName(it) }, startSheet = requested,
-        onSheetConsumed = vm::consumePlayerSheet, downloaded = state.track?.cacheKey in downloadedKeys, style = style)
+        onSheetConsumed = vm::consumePlayerSheet, downloaded = state.track?.cacheKey in downloadedKeys, style = style, effects = effects, effectsState = effectsState)
 
 }
 
@@ -90,6 +101,8 @@ fun PlayerContent(
     source: String? = null, startSheet: String? = null, onSheetConsumed: () -> Unit = {},
     downloaded: Boolean = false,
     style: PlayerStyle = PlayerStyle.CLASSIC,
+    effects: io.github.nutea.anylisten.core.model.AudioEffectsSettings = io.github.nutea.anylisten.core.model.AudioEffectsSettings(),
+    effectsState: io.github.nutea.anylisten.core.model.AudioEffectsState = io.github.nutea.anylisten.core.model.AudioEffectsState(),
 ) {
     var sheet by remember { mutableStateOf<String?>(null) }
     val pager = rememberPagerState(pageCount = { 2 })
@@ -224,6 +237,20 @@ fun PlayerContent(
                 }
             }
             state.error?.let { Notice(it, error = true) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { sheet = "sleep" }, modifier = Modifier.weight(1f).testTag("sleep_timer_button")) {
+                    Icon(Icons.Default.Bedtime, null, Modifier.size(16.dp))
+                    Text(sleepTimerLabel(state.sleepTimer, compact = true), Modifier.padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { sheet = "effects" }, modifier = Modifier.testTag("audio_effects_button")) {
+                    Icon(Icons.Default.Tune, stringResource(R.string.audio_effects_title))
+                }
+                TextButton(onClick = { sheet = "audio" }, modifier = Modifier.weight(1f).testTag("audio_info_button")) {
+                    Icon(Icons.Default.Info, null, Modifier.size(16.dp))
+                    Text(stringResource(R.string.audio_info), Modifier.padding(start = 6.dp), maxLines = 1)
+                }
+            }
+            // Sound controls stay reachable in both the artwork and lyrics pages.
             PlaybackSlider(state, actions.seek)
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -282,8 +309,11 @@ fun PlayerContent(
                     }
                     Spacer(Modifier.height(16.dp))
                 }
-                "lyrics" -> LyricSettingsContent(state, actions)
-                "queue" -> QueueSheetContent(state, artwork, actions.queuePlay, actions.queueRemove)
+                "lyrics" -> LyricSettingsContent(state, actions.copy(repairLyrics = { sheet = null; actions.repairLyrics() }))
+                "queue" -> QueueSheetContent(state, artwork, actions.queuePlay, actions.queueRemove, actions.queueMove)
+                "sleep" -> SleepTimerContent(state, actions) { sheet = null }
+                "audio" -> AudioInfoContent(state, downloaded)
+                "effects" -> AudioEffectsContent(effects, effectsState, actions.effects)
             }
         }
     }
@@ -292,21 +322,26 @@ fun PlayerContent(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueBottomSheet(state: PlayerUiState, artwork: (Track?) -> String?, onPlay: (Track) -> Unit,
-    onRemove: (Track) -> Unit, onDismiss: () -> Unit) {
+    onRemove: (Track) -> Unit, onDismiss: () -> Unit, onMove: (String, String) -> Unit = { _, _ -> }) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        QueueSheetContent(state, artwork, onPlay, onRemove)
+        QueueSheetContent(state, artwork, onPlay, onRemove, onMove)
     }
 }
 
 @Composable
-private fun QueueSheetContent(state: PlayerUiState, artwork: (Track?) -> String?, onPlay: (Track) -> Unit, onRemove: (Track) -> Unit) {
+internal fun QueueSheetContent(state: PlayerUiState, artwork: (Track?) -> String?, onPlay: (Track) -> Unit,
+    onRemove: (Track) -> Unit, onMove: (String, String) -> Unit) {
     val tracksByKey = state.queue.associateBy { it.cacheKey }
     val displayedQueue = if (state.shuffled && state.playbackOrder.isNotEmpty())
         state.playbackOrder.mapNotNull(tracksByKey::get) else state.queue
     val sections = QueueSections.from(displayedQueue, state.track?.cacheKey, state.laterKeys)
+    val listState = rememberLazyListState()
+    val drag = rememberQueueDrag(listState, sections, onMove)
     Column(Modifier.fillMaxHeight(.75f)) {
     Text(stringResource(R.string.queue_count, state.queue.size), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
-    LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
+    Text(stringResource(R.string.queue_drag_hint), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp))
+    LazyColumn(Modifier.weight(1f).testTag("reorder_queue"), state = listState, contentPadding = PaddingValues(bottom = 20.dp)) {
         if (state.queue.isEmpty()) item { EmptyContent(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.player_empty), stringResource(R.string.player_empty_detail)) }
         sections.nowPlaying?.let { item ->
             item { QueueSectionLabel(stringResource(R.string.queue_now_playing)) }
@@ -314,14 +349,16 @@ private fun QueueSheetContent(state: PlayerUiState, artwork: (Track?) -> String?
         }
         if (sections.later.isNotEmpty()) {
             item { QueueSectionLabel(stringResource(R.string.queue_later)) }
-            itemsIndexed(sections.later, key = { index, item -> "later:${item.cacheKey}:$index" }) { _, item ->
-                QueueTrackRow(item, artwork(item), false, state.isPlaying, onPlay, onRemove)
+            itemsIndexed(sections.later, key = { _, item -> item.cacheKey }) { _, item ->
+                QueueTrackRow(item, artwork(item), false, state.isPlaying, onPlay, onRemove,
+                    modifier = with(drag) { Modifier.rowModifier(item.cacheKey) }, dragHandle = { QueueDragHandle(drag, item, sections.later) })
             }
         }
         if (sections.rest.isNotEmpty()) {
             item { QueueSectionLabel(stringResource(R.string.queue_next)) }
-            itemsIndexed(sections.rest, key = { index, item -> "rest:${item.cacheKey}:$index" }) { _, item ->
-                QueueTrackRow(item, artwork(item), false, state.isPlaying, onPlay, onRemove)
+            itemsIndexed(sections.rest, key = { _, item -> item.cacheKey }) { _, item ->
+                QueueTrackRow(item, artwork(item), false, state.isPlaying, onPlay, onRemove,
+                    modifier = with(drag) { Modifier.rowModifier(item.cacheKey) }, dragHandle = { QueueDragHandle(drag, item, sections.rest) })
             }
         }
     }
@@ -408,8 +445,9 @@ private fun QueueSectionLabel(text: String) {
 }
 
 @Composable
-private fun QueueTrackRow(item: Track, cover: String?, current: Boolean, isPlaying: Boolean, onPlay: (Track) -> Unit, onRemove: (Track) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onPlay(item) }.padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+private fun QueueTrackRow(item: Track, cover: String?, current: Boolean, isPlaying: Boolean, onPlay: (Track) -> Unit, onRemove: (Track) -> Unit,
+    modifier: Modifier = Modifier, dragHandle: (@Composable () -> Unit)? = null) {
+    Row(modifier.fillMaxWidth().clickable { onPlay(item) }.padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Artwork(cover, Modifier.size(44.dp), seed = item.album, radius = 8.dp)
         TrackHeading(item.title, item.artist, Modifier.weight(1f))
@@ -417,6 +455,7 @@ private fun QueueTrackRow(item: Track, cover: String?, current: Boolean, isPlayi
         IconButton(onClick = { onRemove(item) }) {
             Icon(Icons.Default.Close, stringResource(R.string.remove_queue_track, item.title))
         }
+        dragHandle?.invoke()
     }
 }
 
@@ -512,6 +551,9 @@ internal fun formatMs(ms: Long): String {
 private fun LyricSettingsContent(state: PlayerUiState, actions: PlayerActions) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
         Text(stringResource(R.string.lyric_settings), style = MaterialTheme.typography.titleLarge)
+        OutlinedButton(actions.repairLyrics, enabled = state.track != null, modifier = Modifier.fillMaxWidth().testTag("lyric_repair_button")) {
+            Text(stringResource(R.string.lyric_repair))
+        }
         Text(stringResource(R.string.lyric_settings_subtitle), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 20.dp))
         Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {

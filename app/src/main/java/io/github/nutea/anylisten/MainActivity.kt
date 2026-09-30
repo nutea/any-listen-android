@@ -12,15 +12,17 @@ import io.github.nutea.anylisten.ui.AnyListenRoot
 import io.github.nutea.anylisten.ui.theme.AnyListenTheme
 
 class MainActivity : ComponentActivity() {
+    private var openPlayerRequest by mutableIntStateOf(0)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as AnyListenApp
+        if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true) openPlayerRequest++
         setContent {
             val themeMode by app.container.settings.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
             val dark = themeMode.isDark(isSystemInDarkTheme())
             AnyListenTheme(darkTheme = dark) {
-                AnyListenRoot(app.container, playLast = wantsPlayLast(intent))
+                AnyListenRoot(app.container, playLast = wantsPlayLast(intent), openPlayerRequest = openPlayerRequest)
             }
         }
     }
@@ -33,10 +35,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) openPlayerRequest++
     }
 
     companion object {
         const val EXTRA_PLAY_LAST = "play_last"
+        const val EXTRA_OPEN_PLAYER = "open_player"
 
         fun wantsPlayLast(intent: Intent?): Boolean = intent?.getBooleanExtra(EXTRA_PLAY_LAST, false) == true
     }

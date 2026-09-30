@@ -87,6 +87,17 @@ fun LibraryOverviewContent(state: LibraryUiState, artwork: (Track?) -> String?,
                     }
                 }
             }
+            Surface(onClick = onSearch, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag("smart_library_entry")) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.smart_library_title), style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.smart_library_subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(Icons.Default.ChevronRight, null)
+                }
+            }
             Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.custom_playlists), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 Text(custom.size.toString(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)

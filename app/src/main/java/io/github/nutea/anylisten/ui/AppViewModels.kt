@@ -64,6 +64,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import io.github.nutea.anylisten.core.model.PlayerStyle
+import io.github.nutea.anylisten.core.model.SleepTimerState
+import io.github.nutea.anylisten.core.model.AudioInfo
+import io.github.nutea.anylisten.core.model.QueueReorder
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -93,6 +96,7 @@ data class LibraryUiState(
     val playlistError: String? = null,
     val playlistEditSuccess: Int = 0,
     val pendingAdd: List<Track>? = null,
+    val pendingMoveFrom: String? = null,
     val pendingDownload: List<Track>? = null,
     val status: String? = null,
     val sort: TrackSortField = TrackSortField.TITLE,
@@ -120,12 +124,49 @@ data class PlayerUiState(
     val playbackOrder: List<String> = emptyList(),
     val repeat: RepeatMode = RepeatMode.ALL,
     val laterKeys: List<String> = emptyList(),
+    val sleepTimer: SleepTimerState = SleepTimerState(),
+    val audioInfo: AudioInfo = AudioInfo(),
+    val queueReady: Boolean = false,
 )
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 class AppViewModel(application: Application) : AndroidViewModel(application) {
-    val musicComments get() = container.comments
     private val container: AppContainer = (application as AnyListenApp).container
+
+    val lyricRepair get() = container.gateway.lyricRepair
+    val effects = container.settings.audioEffects.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly,
+        io.github.nutea.anylisten.core.model.AudioEffectsSettings())
+    val effectsState = PlaybackService.audioEffects
+    val searchHistory = container.settings.searchHistory.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
+    val listeningStats = container.listening.stats.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
+    fun rememberSearch(query: String) { safeLaunch { container.settings.rememberSearch(query) } }
+    fun clearSearchHistory() { safeLaunch { container.settings.clearSearchHistory() } }
+    fun setAudioEffects(value: io.github.nutea.anylisten.core.model.AudioEffectsSettings) { safeLaunch { container.settings.setAudioEffects(value) } }
+    suspend fun applyLyrics(track: Track, lyrics: Lyrics, server: Boolean) {
+        if (server) {
+            lyricRepair.save(track, lyrics)
+            container.offlineAssets.storeServerLyrics(track, lyrics)
+            container.offlineAssets.setLocalLyrics(track, null)
+        } else container.offlineAssets.setLocalLyrics(track, lyrics)
+        if (_player.value.track?.cacheKey == track.cacheKey) {
+            lyricsJob?.cancel()
+            _player.update { it.copy(lyrics = lyrics) }
+        }
+    }
+    suspend fun resetLyrics(track: Track, server: Boolean) {
+        if (server) lyricRepair.remove(track)
+        container.offlineAssets.setLocalLyrics(track, null)
+        val lyrics = if (server) {
+            val original = container.gateway.resolveLyrics(track)
+            container.offlineAssets.storeServerLyrics(track, original)
+            original
+        } else withContext(Dispatchers.IO) {
+            container.offlineAssets.cachedLyrics(track) ?: Lyrics(emptyList(), "")
+        }
+        if (_player.value.track?.cacheKey == track.cacheKey) _player.update { it.copy(lyrics = lyrics) }
+    }
+    fun hasLocalLyrics(track: Track) = container.offlineAssets.localLyrics(track) != null
+    val musicComments get() = container.comments
     private val _connect = MutableStateFlow(ConnectUiState())
     val connect: StateFlow<ConnectUiState> = _connect.asStateFlow()
     private val _library = MutableStateFlow(LibraryUiState())
@@ -177,6 +218,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         applyStoredSession(container.sessionStore.current())
+        safeLaunch {
+            combine(PlaybackService.sleepTimerState, PlaybackService.audioInfo) { timer, audio -> timer to audio }
+                .collect { (timer, audio) -> _player.update { it.copy(sleepTimer = timer,
+                    audioInfo = audio.takeIf { info -> info.trackKey == it.track?.cacheKey } ?: AudioInfo()) } }
+        }
         safeLaunch {
             container.library.observeLibrary().collect { snap ->
                 _library.update { state ->
@@ -360,19 +406,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun play(tracks: List<Track>, start: Track? = tracks.firstOrNull(), startPositionMs: Long = 0L, laterKeys: List<String> = emptyList(), sourceListId: String? = null) {
+    fun play(tracks: List<Track>, start: Track? = tracks.firstOrNull(), startPositionMs: Long = 0L, laterKeys: List<String> = emptyList(), sourceListId: String? = null,
+        playbackOrder: List<String> = emptyList()) {
         if (tracks.isEmpty()) return
         val current = _player.value
         _player.update {
             it.copy(track = start, queue = tracks, error = null, lyrics = null, positionMs = startPositionMs, laterKeys = laterKeys, isPlaying = false, playWhenReady = true, isBuffering = true)
         }
         lyricsForKey = null
-        val pending = PendingPlayback(tracks, start, current.shuffled, current.repeat, startPositionMs, laterKeys, sourceListId)
+        val pending = PendingPlayback(tracks, start, current.shuffled, current.repeat, startPositionMs, laterKeys, sourceListId, playbackOrder)
         PlaybackService.pendingPlay.set(pending)
         val service = PlaybackService.service
         if (service != null) {
             PlaybackService.pendingPlay.set(null)
-            service.playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs, pending.laterKeys, pending.sourceListId)
+            service.playTracks(pending.tracks, pending.start, pending.shuffled, pending.repeat, pending.startPositionMs, pending.laterKeys, pending.sourceListId, pending.playbackOrder)
         } else {
             applicationContext.startService(Intent(applicationContext, PlaybackService::class.java))
         }
@@ -389,7 +436,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             restorePlayback()
             val state = _player.value
             if (state.queue.isNotEmpty()) {
-                play(state.queue, state.track, state.positionMs, state.laterKeys)
+                play(state.queue, state.track, state.positionMs, state.laterKeys, playbackOrder = state.playbackOrder)
                 return@safeLaunch
             }
             val completed = _downloads.value.firstOrNull { it.status == DownloadStatus.COMPLETED }
@@ -425,7 +472,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val state = _player.value
         if (c == null || c.mediaItemCount == 0) {
             if (state.queue.isNotEmpty()) {
-                play(state.queue, state.track, state.positionMs, state.laterKeys)
+                play(state.queue, state.track, state.positionMs, state.laterKeys, playbackOrder = state.playbackOrder)
             } else {
                 playLast()
             }
@@ -492,6 +539,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cyclePlayMode() {
         applyPlayMode(PlaybackMode.from(_player.value.repeat, _player.value.shuffled).next())
+    }
+
+    fun startSleepTimer(durationMs: Long) { PlaybackService.service?.startSleepTimer(durationMs) }
+    fun stopAfterCurrentTrack() { PlaybackService.service?.stopAfterCurrentTrack() }
+    fun cancelSleepTimer() { PlaybackService.service?.cancelSleepTimer() }
+
+    fun moveQueueItem(from: String, to: String) {
+        val service = PlaybackService.service
+        if (service?.hasPlaybackQueue() == true) {
+            service.moveQueueTrack(from, to)
+            controller?.let(::publishController)
+            return
+        }
+        val state = _player.value
+        val byKey = state.queue.associateBy { it.cacheKey }
+        val displayed = if (state.shuffled && state.playbackOrder.isNotEmpty()) state.playbackOrder.mapNotNull(byKey::get) else state.queue
+        val moved = QueueReorder.move(displayed, state.track?.cacheKey, state.laterKeys, from, to) ?: return
+        val order = if (state.shuffled) moved.queue.map { it.cacheKey } else emptyList()
+        _player.update { it.copy(queue = moved.queue, laterKeys = moved.laterKeys, playbackOrder = order) }
+        PlaybackService.pendingPlay.updateAndGet { it?.copy(tracks = moved.queue, laterKeys = moved.laterKeys, playbackOrder = order) }
+        persistPlayback(force = true)
     }
 
     fun setPlayMode(mode: PlaybackMode) {
@@ -642,18 +710,56 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startAddToPlaylist(track: Track) = startAddToPlaylist(listOf(track))
 
+    fun startMoveToPlaylist(tracks: List<Track>) {
+        val source = _library.value.selected ?: return
+        if (!io.github.nutea.anylisten.core.model.canManagePlaylist(source) || tracks.isEmpty()) return
+        _library.update { it.copy(pendingAdd = tracks, pendingMoveFrom = source.id, error = null, status = null) }
+    }
+    fun savePlaylistOrder(listId: String, original: List<Track>, ordered: List<Track>) {
+        playlistToolMutation {
+            container.library.setPlaylistOrder(listId, original.map { it.identity.remoteTrackId }, ordered.map { it.identity.remoteTrackId })
+            _library.update { state -> state.copy(sort = TrackSortField.SERVER_ORDER, sortAscending = true,
+                filtered = filter(state.snapshot, state.selected, state.query, TrackSortField.SERVER_ORDER, true)) }
+        }
+    }
+    fun copySelectedPlaylist(name: String, newId: String) {
+        val source = _library.value.selected ?: return
+        playlistToolMutation { container.library.copyPlaylist(source.id, newId, name) }
+    }
+    private fun playlistToolMutation(block: suspend () -> Unit) {
+        if (_library.value.playlistBusy) return
+        _library.update { it.copy(playlistBusy = true, playlistError = null) }
+        safeLaunch {
+            try {
+                block()
+                _library.update { it.copy(playlistBusy = false, playlistEditSuccess = it.playlistEditSuccess + 1,
+                    status = applicationContext.getString(R.string.playlist_tools_saved)) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
+                runCatching { container.library.refresh() }
+                _library.update { it.copy(playlistBusy = false, playlistError = applicationContext.getString(R.string.playlist_tools_failed)) }
+            }
+        }
+    }
     fun startAddToPlaylist(tracks: List<Track>) {
         if (tracks.isEmpty()) return
-        _library.update { it.copy(pendingAdd = tracks, error = null, status = null) }
+        _library.update { it.copy(pendingAdd = tracks, pendingMoveFrom = null, error = null, status = null) }
     }
 
     fun cancelAddToPlaylist() {
-        _library.update { it.copy(pendingAdd = null) }
+        _library.update { it.copy(pendingAdd = null, pendingMoveFrom = null) }
     }
 
     fun confirmAddToPlaylist(playlist: Playlist) {
         val tracks = _library.value.pendingAdd ?: return
-        _library.update { it.copy(pendingAdd = null) }
+        val moveFrom = _library.value.pendingMoveFrom
+        if (moveFrom != null) {
+            _library.update { it.copy(pendingAdd = null, pendingMoveFrom = null) }
+            playlistToolMutation { container.library.movePlaylistTracks(moveFrom, playlist.id, tracks) }
+            return
+        }
+        val duplicates = tracks.count { track -> _library.value.snapshot.tracksByPlaylist[playlist.id].orEmpty().any { it.identity.remoteTrackId == track.identity.remoteTrackId } }
+        _library.update { it.copy(pendingAdd = null, pendingMoveFrom = null) }
         safeLaunch {
             var ok = 0
             var fail = 0
@@ -666,7 +772,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _library.update {
                 it.copy(
                     error = if (ok == 0) lastError?.let(::message) else null,
-                    status = if (tracks.size == 1 && fail == 0) {
+                    status = if (fail == 0 && duplicates > 0) applicationContext.getString(R.string.playlist_duplicates_skipped, duplicates) else if (tracks.size == 1 && fail == 0) {
                         applicationContext.getString(R.string.added_to_playlist, playlistLabel(playlist))
                     } else applicationContext.getString(R.string.batch_result, ok, fail),
                 )
@@ -674,7 +780,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addTargets(): List<Playlist> = _library.value.snapshot.playlists.filter { it.canMutateOnline }
+    fun addTargets(): List<Playlist> = _library.value.let { state -> state.snapshot.playlists.filter {
+        it.canMutateOnline && (state.pendingMoveFrom == null || (io.github.nutea.anylisten.core.model.canManagePlaylist(it) && it.id != state.pendingMoveFrom))
+    } }
 
     fun playlistLabel(playlist: Playlist): String {
         val ctx = applicationContext
@@ -855,11 +963,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         controller = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
+        _player.update { it.copy(queueReady = false) }
     }
 
     private fun publishController(player: Player) {
         // A newly bound service has no timeline; keep the restored queue and position.
-        if (player.mediaItemCount == 0) return
+        if (player.mediaItemCount == 0) {
+            _player.update { it.copy(queueReady = false) }
+            return
+        }
         val mediaId = player.currentMediaItem?.mediaId
         val queued = _player.value.queue.firstOrNull { it.cacheKey == mediaId }
         val meta = player.currentMediaItem?.mediaMetadata
@@ -885,6 +997,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _player.update {
             it.copy(
                 track = track ?: it.track,
+                queue = PlaybackService.service?.tracksInQueue()?.takeIf { items -> items.isNotEmpty() } ?: it.queue,
+                queueReady = true,
+                audioInfo = PlaybackService.audioInfo.value.takeIf { info -> info.trackKey == track?.cacheKey } ?: AudioInfo(),
+                laterKeys = PlaybackService.service?.laterQueueKeys() ?: it.laterKeys.filter { key -> key != track?.cacheKey },
                 isPlaying = player.isPlaying,
                 playWhenReady = player.playWhenReady && player.playerError == null && player.playbackState != Player.STATE_ENDED,
                 isBuffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING && player.playerError == null,
@@ -898,7 +1014,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 playbackOrder = PlaybackService.service?.playbackOrderKeys()
                     ?: player.playbackOrderKeys(),
                 repeat = repeat,
-                laterKeys = it.laterKeys.filter { key -> key != track?.cacheKey },
             )
         }
         track?.let { loadLyrics(it) }
@@ -922,6 +1037,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     repeat = state.repeat.name,
                     positionMs = state.positionMs,
                     laterKeys = state.laterKeys,
+                    playbackOrder = if (state.shuffled) state.playbackOrder else emptyList(),
                 ),
             )
         }
@@ -929,6 +1045,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun restorePlayback() {
         if (_player.value.queue.isNotEmpty()) return
+        PlaybackService.awaitPlaybackPersistence()
         val saved = container.settings.playback.first()
         if (saved.cacheKeys.isEmpty()) return
         val library = _library.value.snapshot.tracksByPlaylist.values.flatten().ifEmpty {
@@ -955,6 +1072,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 positionMs = saved.positionMs,
                 isPlaying = false, playWhenReady = false, isBuffering = false,
                 laterKeys = saved.laterKeys,
+                playbackOrder = saved.playbackOrder,
             )
         }
         loadLyrics(restoredTrack)

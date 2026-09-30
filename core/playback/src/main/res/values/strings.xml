@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="widget_playback_start">Preparing playback</string>
     <string name="session_favorite">Favorite</string>
     <string name="session_unfavorite">Remove from favorites</string>
     <string name="session_play_mode_list_loop">List loop</string>

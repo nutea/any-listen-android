@@ -33,6 +33,10 @@ def licenses(coord,depth=0):
         parent=root.find("m:parent",NS)
         if parent is not None:
             result=licenses(":".join(parent.findtext("m:"+x,namespaces=NS) for x in ["groupId","artifactId","version"]),depth+1)
+    # TinyPinyin 2.0.3 publishes a dependency-only POM. Its versioned source LICENSE is
+    # retained in third_party/tinypinyin; use this verified exception rather than a guess.
+    if not result and coord == "com.github.promeg:tinypinyin:2.0.3":
+        result = [("Apache License, Version 2.0", "https://github.com/promeG/TinyPinyin/blob/c4c65b9c0c82cc8e60ef081e91f3cc66b7829dcc/LICENSE")]
     if not result: raise RuntimeError("No license metadata: "+coord)
     return result
 

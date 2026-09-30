@@ -4,6 +4,7 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import io.github.nutea.anylisten.core.data.local.AppDatabase
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,14 +33,16 @@ class DatabaseMigrationTest {
             legacy.version = 1
         }
         val db = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_1_2).build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build()
         try {
             val playlist = db.libraryDao().playlists().single()
             assertEquals("Saved", playlist.name)
             assertEquals(0, playlist.position)
             assertEquals("Title", db.libraryDao().tracks("playlist").single().title)
             assertEquals("/saved/song.mp3", db.downloadDao().find("key")!!.filePath)
-            assertEquals(2, db.openHelper.readableDatabase.version)
+            assertEquals(3, db.openHelper.readableDatabase.version)
+            db.listeningStatDao().record("key", 1234, 1, 5000)
+            assertEquals(1234L, db.listeningStatDao().observe().first().single().listenedMs)
         } finally {
             db.close()
             context.deleteDatabase(name)

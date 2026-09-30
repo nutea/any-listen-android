@@ -56,6 +56,7 @@ class AppContainer(context: Context) {
     val offlineAssets = OfflineAssets(appContext.filesDir.resolve("offline"), gateway,
         FileDownloader(clients.api), artwork) { sessionStore.current()?.profile?.baseUrl.orEmpty() }
     val library = LibraryRepository(db.libraryDao(), gateway)
+    val listening = io.github.nutea.anylisten.core.data.repo.ListeningRepository(db.listeningStatDao(), scope)
     val recentlyPlayed = RecentlyPlayedRecorder(library)
     val session = SessionRepository(connection)
     val downloadsDir = appContext.filesDir.resolve("downloads").apply { mkdirs() }

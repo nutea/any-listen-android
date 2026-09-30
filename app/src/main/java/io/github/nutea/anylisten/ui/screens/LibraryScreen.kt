@@ -35,20 +35,23 @@ import io.github.nutea.anylisten.ui.LibraryUiState
 import io.github.nutea.anylisten.ui.confirmHaptic
 import io.github.nutea.anylisten.ui.tickHaptic
 
-enum class TrackAction { PLAY, FAVORITE, ADD, REMOVE, DOWNLOAD, PLAY_LATER }
+enum class TrackAction { PLAY, FAVORITE, ADD, REMOVE, DOWNLOAD, PLAY_LATER, MOVE }
 
 @Composable
 fun PlaylistScreen(vm: AppViewModel, onBack: () -> Unit, onSearch: () -> Unit, onOpenPlayer: () -> Unit, canInteract: () -> Boolean = { true }) {
     val state by vm.library.collectAsState()
     val player by vm.player.collectAsState()
     val downloadedKeys = downloadedTrackKeys(vm)
+    var tools by remember { mutableStateOf(false) }
+    if (tools) PlaylistToolsSheet(vm) { tools = false }
     LibraryContent(state, player.track?.cacheKey, vm::artworkUrl, vm::isFavorite, vm::selectPlaylist,
         vm::updateQuery, { if (canInteract()) vm.play(state.filtered, sourceListId = state.selected?.id) }, { if (canInteract()) vm.requestDownload(state.filtered.filterNot { it.cacheKey in downloadedKeys }) },
         vm::isAvailableOffline, vm::setSort,
-        onBack = onBack, onSearch = onSearch, isPlaying = player.isPlaying, downloaded = { it.cacheKey in downloadedKeys },
+        onBack = onBack, onSearch = onSearch, onManageTracks = { vm.clearPlaylistError(); tools = true }, isPlaying = player.isPlaying, downloaded = { it.cacheKey in downloadedKeys },
         onBatch = { tracks, action ->
             if (canInteract()) when (action) {
                 TrackAction.ADD -> vm.startAddToPlaylist(tracks)
+                TrackAction.MOVE -> vm.startMoveToPlaylist(tracks)
                 TrackAction.REMOVE -> vm.removeFromSelected(tracks)
                 TrackAction.DOWNLOAD -> vm.requestDownload(tracks)
                 TrackAction.PLAY_LATER -> vm.playLater(tracks)
@@ -60,6 +63,7 @@ fun PlaylistScreen(vm: AppViewModel, onBack: () -> Unit, onSearch: () -> Unit, o
             TrackAction.PLAY -> if (player.track?.cacheKey == track.cacheKey) onOpenPlayer() else vm.play(state.filtered, track, sourceListId = state.selected?.id)
             TrackAction.FAVORITE -> vm.toggleFavorite(track)
             TrackAction.ADD -> vm.startAddToPlaylist(track)
+            TrackAction.MOVE -> vm.startMoveToPlaylist(listOf(track))
             TrackAction.REMOVE -> vm.removeFromSelected(track)
             TrackAction.DOWNLOAD -> vm.download(listOf(track))
             TrackAction.PLAY_LATER -> vm.playLater(listOf(track))
@@ -74,7 +78,9 @@ fun LibraryDialogs(vm: AppViewModel) {
         AddToPlaylistSheet(vm.addTargets(), tracks.size,
             artwork = { playlist -> vm.playlistArtworkUrl(playlist)
                 ?: vm.artworkUrl(state.snapshot.tracksByPlaylist[playlist.id]?.firstOrNull()) },
-            onSelect = vm::confirmAddToPlaylist, onDismiss = vm::cancelAddToPlaylist)
+            onSelect = vm::confirmAddToPlaylist, onDismiss = vm::cancelAddToPlaylist,
+            moving = state.pendingMoveFrom != null,
+            duplicates = { playlist -> tracks.count { track -> state.snapshot.tracksByPlaylist[playlist.id].orEmpty().any { it.identity.remoteTrackId == track.identity.remoteTrackId } } })
     }
     state.pendingDownload?.let { tracks ->
         AlertDialog(onDismissRequest = vm::cancelPendingDownload,
@@ -85,7 +91,7 @@ fun LibraryDialogs(vm: AppViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun LibraryContent(
     state: LibraryUiState, currentKey: String?, artwork: (Track?) -> String?, favorite: (Track) -> Boolean,
@@ -96,6 +102,7 @@ fun LibraryContent(
     onBatch: (List<Track>, TrackAction) -> Unit = { _, _ -> },
     onBack: (() -> Unit)? = null,
     onSearch: () -> Unit = {},
+    onManageTracks: () -> Unit = {},
     downloaded: (Track) -> Boolean = { false },
     isPlaying: Boolean = false,
     onAction: (Track, TrackAction) -> Unit,
@@ -132,11 +139,16 @@ fun LibraryContent(
                     }
                     Text(state.selected?.let { playlistName(it) }.orEmpty(), Modifier.weight(1f),
                         style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (state.selected?.canManage == true) IconButton(onClick = onManageTracks,
+                        enabled = !state.snapshot.offline && !state.playlistBusy, modifier = Modifier.testTag("playlist_tools_button")) {
+                        Icon(Icons.Default.EditNote, stringResource(R.string.playlist_tools))
+                    }
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Default.Search, stringResource(R.string.show_search))
                     }
                 }
                 if (state.snapshot.offline) Box(Modifier.padding(top = 8.dp, end = 8.dp)) { Notice(stringResource(R.string.offline_banner)) }
+                state.playlistError?.let { Notice(it, error = true) }
                 state.error?.let { Box(Modifier.padding(top = 8.dp, end = 8.dp)) { Notice(it, error = true) } }
             }
         }
@@ -211,11 +223,13 @@ fun LibraryContent(
                             }
                         }
                         if (selecting) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { onBatch(selectedTracks, TrackAction.ADD); exitSelect() },
                                     enabled = selectedTracks.isNotEmpty() && !state.snapshot.offline) {
                                     Text(stringResource(R.string.cd_add_to_playlist))
                                 }
+                                if (state.selected?.canManage == true) TextButton(onClick = { onBatch(selectedTracks, TrackAction.MOVE); exitSelect() },
+                                    enabled = selectedTracks.isNotEmpty() && !state.snapshot.offline && !state.playlistBusy) { Text(stringResource(R.string.playlist_move_tracks)) }
                                 TextButton(onClick = { batchRemove = true },
                                     enabled = selectedTracks.isNotEmpty() && state.selected?.canMutateOnline == true && !state.snapshot.offline) {
                                     Text(stringResource(R.string.cd_remove))
@@ -348,6 +362,7 @@ private fun sortLabel(field: TrackSortField, selected: Boolean, ascending: Boole
         TrackSortField.ARTIST -> R.string.sort_artist
         TrackSortField.ALBUM -> R.string.sort_album
         TrackSortField.PLAY_TIME -> R.string.sort_play_time
+        TrackSortField.SERVER_ORDER -> R.string.playlist_server_order
     })
     if (!selected) return name
     return name + if (ascending) " ↑" else " ↓"

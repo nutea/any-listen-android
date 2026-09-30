@@ -521,6 +521,12 @@
       "http://www.apache.org/licenses/LICENSE-2.0.txt"
     ]
   ],
+  "com.github.promeg:tinypinyin:2.0.3": [
+    [
+      "Apache License, Version 2.0",
+      "https://github.com/promeG/TinyPinyin/blob/c4c65b9c0c82cc8e60ef081e91f3cc66b7829dcc/LICENSE"
+    ]
+  ],
   "com.google.accompanist:accompanist-drawablepainter:0.32.0": [
     [
       "The Apache Software License, Version 2.0",
@@ -597,6 +603,12 @@
     [
       "The Apache License, Version 2.0",
       "https://www.apache.org/licenses/LICENSE-2.0.txt"
+    ]
+  ],
+  "org.ahocorasick:ahocorasick:0.3.0": [
+    [
+      "The Apache Software License, Version 2.0",
+      "http://www.apache.org/licenses/LICENSE-2.0.txt"
     ]
   ],
   "org.jetbrains.kotlin:kotlin-android-extensions-runtime:1.9.22": [

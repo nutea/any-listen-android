@@ -8,6 +8,7 @@ kotlin {
 }
 
 dependencies {
+    implementation("com.github.promeg:tinypinyin:2.0.3")
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)

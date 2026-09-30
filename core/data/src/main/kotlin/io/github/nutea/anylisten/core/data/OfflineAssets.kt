@@ -1,5 +1,9 @@
 package io.github.nutea.anylisten.core.data
 
+import io.github.nutea.anylisten.core.data.gateway.ProtocolDtos
+import io.github.nutea.anylisten.core.data.gateway.lyricPayload
+import kotlinx.serialization.json.jsonObject
+
 import io.github.nutea.anylisten.core.data.download.FileDownloader
 import io.github.nutea.anylisten.core.data.gateway.AnyListenGateway
 import io.github.nutea.anylisten.core.data.gateway.UrlNormalizer
@@ -168,7 +172,7 @@ class OfflineAssets(
 
     fun inspect(cacheKey: String): AssetCompleteness = AssetCompleteness(
         audioReady = audioFile(cacheKey) != null,
-        lyrics = sidecarState(cacheKey, ".lrc"),
+        lyrics = if (file(cacheKey, ".lyric-local").isFile) SidecarState.READY else sidecarState(cacheKey, ".lrc"),
         cover = sidecarState(cacheKey, ".cover"),
     )
 
@@ -185,13 +189,32 @@ class OfflineAssets(
         writeCatalog(readCatalog().filter { it.cacheKey != cacheKey })
     }
 
-    fun cachedLyrics(track: Track): Lyrics? = file(track.cacheKey, ".lrc").takeIf { it.isFile && it.length() > 0 }?.let {
+    fun localLyrics(track: Track): Lyrics? = file(track.cacheKey, ".lyric-local").takeIf { it.isFile }?.let {
+        runCatching { ProtocolDtos.lyricsFrom(kotlinx.serialization.json.Json.parseToJsonElement(it.readText()).jsonObject) }.getOrNull()
+    }
+    suspend fun storeServerLyrics(track: Track, lyrics: Lyrics) = withContext(Dispatchers.IO) {
+        lock(lyricLocks, track.cacheKey).withLock {
+            persistLyrics(track.cacheKey, lyrics, false)
+            writeLyricCheck(track.cacheKey, lyricRevision(lyrics))
+            changes.update { it + 1 }
+        }
+    }
+    suspend fun setLocalLyrics(track: Track, lyrics: Lyrics?) = withContext(Dispatchers.IO) {
+        lock(lyricLocks, track.cacheKey).withLock {
+            if (lyrics == null) file(track.cacheKey, ".lyric-local").delete()
+            else writeAtomic(file(track.cacheKey, ".lyric-local"), lyricPayload(track, lyrics).toString())
+            changes.update { it + 1 }
+        }
+    }
+    fun cachedLyrics(track: Track): Lyrics? = localLyrics(track) ?: cachedServerLyrics(track)
+    private fun cachedServerLyrics(track: Track): Lyrics? = file(track.cacheKey, ".lrc").takeIf { it.isFile && it.length() > 0 }?.let {
         fun extra(suffix: String) = runCatching { file(track.cacheKey, suffix).readText() }.getOrNull()
         runCatching { LrcParser.parse(it.readText(), extra(".tlrc"), extra(".rlrc"), extra(".awlrc")) }.getOrNull()
     }
 
     suspend fun lyrics(track: Track, force: Boolean = false): Lyrics = withContext(Dispatchers.IO) {
-        val saved = cachedLyrics(track)
+        localLyrics(track)?.let { return@withContext it }
+        val saved = cachedServerLyrics(track)
         val absent = file(track.cacheKey, ".lrc.none").isFile
         if (!force && gateway.isOnline() && (saved != null || absent)) {
             scheduleLyricRevalidate(track)
@@ -218,7 +241,7 @@ class OfflineAssets(
 
     private suspend fun refreshLyrics(track: Track, force: Boolean, skipTtl: Boolean): Lyrics =
         lock(lyricLocks,track.cacheKey).withLock {
-        val saved = cachedLyrics(track)
+        val saved = cachedServerLyrics(track)
         val (checked, _) = readLyricCheck(track.cacheKey)
         val absent = file(track.cacheKey, ".lrc.none").isFile
         val interval = if (skipTtl) LYRIC_PLAY_REVALIDATE_MS else CACHE_CHECK_INTERVAL_MS
@@ -506,6 +529,6 @@ class OfflineAssets(
     }
 
     private companion object {
-        val RESOURCE_SUFFIXES = listOf(".rlrc", ".awlrc", ".tlrc", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
+        val RESOURCE_SUFFIXES = listOf(".lyric-local", ".rlrc", ".awlrc", ".tlrc", ".lrc", ".lrc.none", ".lrc.fail", ".cover", ".cover.none", ".cover.fail")
     }
 }

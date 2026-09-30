@@ -1,6 +1,9 @@
 package io.github.nutea.anylisten.core.playback
 
 import android.app.PendingIntent
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
@@ -22,6 +25,7 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
@@ -30,17 +34,28 @@ import androidx.media3.session.MediaSession.ConnectionResult.AcceptedResultBuild
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import androidx.media3.session.DefaultMediaNotificationProvider
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.github.nutea.anylisten.core.data.AppContainer
 import io.github.nutea.anylisten.core.data.AppScopes
+import io.github.nutea.anylisten.core.data.session.AppSettingsStore
+import io.github.nutea.anylisten.core.data.session.PersistedPlayback
 import io.github.nutea.anylisten.core.data.connection.ConnectionState
 import io.github.nutea.anylisten.core.model.PlaybackMode
 import io.github.nutea.anylisten.core.model.ProtocolConstants
 import io.github.nutea.anylisten.core.model.RepeatMode
 import io.github.nutea.anylisten.core.model.Track
+import io.github.nutea.anylisten.core.model.AudioInfo
+import io.github.nutea.anylisten.core.model.AudioLocation
+import io.github.nutea.anylisten.core.model.SleepTimerState
+import io.github.nutea.anylisten.core.model.QueueReorder
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -62,6 +77,7 @@ data class PendingPlayback(
     val startPositionMs: Long = 0L,
     val laterKeys: List<String> = emptyList(),
     val sourceListId: String? = null,
+    val playbackOrder: List<String> = emptyList(),
 )
 
 class PlaybackService : MediaSessionService() {
@@ -84,6 +100,12 @@ class PlaybackService : MediaSessionService() {
     private val favoriteCommand = SessionCommand(COMMAND_FAVORITE, Bundle.EMPTY)
     private val playModeCommand = SessionCommand(COMMAND_PLAY_MODE, Bundle.EMPTY)
     private var favoriteLiked = false
+    private var sleepTimer: SleepTimerController? = null
+    private val audioFormats = mutableMapOf<String, AudioInfo>()
+    private val audioLocations = ConcurrentHashMap<String, AudioLocation>()
+    private var widgetRestoreJob: Job? = null
+    private var publishedQueue = false
+    private var destroying = false
 
     override fun onCreate() {
         super.onCreate()
@@ -139,6 +161,11 @@ class PlaybackService : MediaSessionService() {
             } catch (error: Throwable) {
                 throw IOException(error.message ?: "Media resolve failed", error)
             }
+            audioLocations[key] = if (resource.url.startsWith("file:")) {
+                if (android.net.Uri.parse(resource.url).path.orEmpty().startsWith(container.downloadsDir.path + "/"))
+                    AudioLocation.DOWNLOAD else AudioLocation.CACHE
+            } else AudioLocation.SERVER
+            scope.launch { publishAudioInfo() }
             spec.buildUpon().setUri(android.net.Uri.parse(resource.url)).setKey(resolver.cacheKey(track,resource)).setCustomData(track).build()
         }
         val exo = ExoPlayer.Builder(this, AudioWaveRenderersFactory(this))
@@ -152,9 +179,22 @@ class PlaybackService : MediaSessionService() {
                 true,
             )
             .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
         exo.repeatMode = Player.REPEAT_MODE_ALL
         priority = PriorityQueue(exo, laterKeys)
+        sleepTimer = SleepTimerController(exo, scope).also { timer ->
+            scope.launch { timer.state.collect { mutableSleepTimer.value = it } }
+        }
+        exo.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime,
+                format: androidx.media3.common.Format, decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?) {
+                if (eventTime.windowIndex !in 0 until eventTime.timeline.windowCount) return
+                val key = eventTime.timeline.getWindow(eventTime.windowIndex, androidx.media3.common.Timeline.Window()).mediaItem.mediaId
+                audioFormats[key] = format.audioInfo(key)
+                publishAudioInfo()
+            }
+        })
         exo.addListener(
             object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
@@ -165,12 +205,18 @@ class PlaybackService : MediaSessionService() {
                     watchBuffering(playbackState)
                 }
 
+                override fun onAudioSessionIdChanged(audioSessionId: Int) { effects?.attach(audioSessionId) }
                 override fun onEvents(player: Player, events: Player.Events) {
+                    sampleListening()
                     container.setPlaybackActive(player.playWhenReady && player.playbackState != Player.STATE_ENDED && player.playbackState != Player.STATE_IDLE)
                     savePlayback()
+                    publishAudioInfo()
+                    publishSurface()
+                    if (player.mediaItemCount == 0) sleepTimer?.cancel()
                 }
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    sampleListening(newOccurrence = reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                     mediaItem?.mediaId?.let { laterKeys.remove(it) }
                     if (TrackChangePlayback.shouldPlayAfterTransition(reason, exo.playWhenReady)) {
                         exo.play()
@@ -191,6 +237,12 @@ class PlaybackService : MediaSessionService() {
             },
         )
         player = exo
+        effects = AudioEffectsController(exo) { mutableEffects.value = it }
+        effects?.attach(exo.audioSessionId)
+        scope.launch { container.settings.audioEffects.collect { effects?.update(it) } }
+        scope.launch { while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+            delay(1000); sampleListening()
+        } }
         val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -225,17 +277,35 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         consumePending()
+        if (intent?.action in WIDGET_ACTIONS) {
+            showWidgetStartingNotification()
+            handleWidgetAction(intent!!.action!!)
+        }
         return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
+    private var effects: AudioEffectsController? = null
+    private val listening = io.github.nutea.anylisten.core.model.ListeningAccumulator()
+    private fun sampleListening(newOccurrence: Boolean = false) {
+        val exo = player ?: return
+        val track = exo.currentMediaItem?.mediaId?.let(::trackForKey)
+        val delta = listening.sample(SystemClock.elapsedRealtime(), track?.cacheKey, exo.isPlaying,
+            exo.duration.takeIf { it > 0 } ?: track?.durationMs ?: 0, newOccurrence)
+        (application as ContainerHolder).container.listening.record(delta)
+    }
     override fun onDestroy() {
+        sampleListening()
+        effects?.release()
+        destroying = true
         AudioWaveSignal.reset()
+        sleepTimer?.release()
+        mutableSleepTimer.value = SleepTimerState()
+        mutableAudioInfo.value = AudioInfo()
+        mutableSurface.value = mutableSurface.value?.copy(isPlaying = false, playWhenReady = false, favoriteAvailable = false)
         val finalState = snapshot()
-        if (finalState != null) runBlocking {
-            (application as ContainerHolder).container.settings.setPlayback(finalState)
-        }
+        if (finalState != null) persistPlayback((application as ContainerHolder).container.settings, finalState)
         (application as ContainerHolder).container.setPlaybackActive(false)
         Holder.service = null
         session?.release()
@@ -253,12 +323,15 @@ class PlaybackService : MediaSessionService() {
         startPositionMs: Long = 0L,
         restoredLaterKeys: List<String> = emptyList(),
         sourceListId: String? = null,
+        restoredPlaybackOrder: List<String> = emptyList(),
     ) {
         val exo = player ?: return
         if (Holder.resolver == null) return
         playJob?.cancel()
         playJob = scope.launch {
             tracksByKey.clear()
+            audioFormats.clear()
+            audioLocations.clear()
             laterKeys.clear()
             playSourceListId = sourceListId
             tracks.forEach { tracksByKey[it.cacheKey] = it }
@@ -282,6 +355,7 @@ class PlaybackService : MediaSessionService() {
                 RepeatMode.ONE -> Player.REPEAT_MODE_ONE
             })
             priority?.restore(restoredLaterKeys)
+            if (shuffled) { exo.restorePlaybackOrder(restoredPlaybackOrder); priority?.refresh() }
             exo.prepare()
             exo.play()
             refreshSessionButtons()
@@ -322,7 +396,7 @@ class PlaybackService : MediaSessionService() {
             container.connection.state
                 .map { (it as? ConnectionState.Online)?.generation ?: 0L }
                 .distinctUntilChanged()
-                .collect { generation -> if (generation != 0L) onSessionEstablished() }
+                .collect { generation -> if (generation != 0L) { onSessionEstablished(); refreshSessionButtons() }; publishSurface() }
         }
     }
 
@@ -401,12 +475,57 @@ class PlaybackService : MediaSessionService() {
     }
 
     fun playbackOrderKeys(): List<String> = player?.playbackOrderKeys().orEmpty()
+    fun laterQueueKeys(): List<String> = laterKeys.toList()
 
     fun hasPlaybackQueue(): Boolean = (player?.mediaItemCount ?: 0) > 0
+
+    fun tracksInQueue(): List<Track> = player?.let { exo ->
+        (0 until exo.mediaItemCount).mapNotNull { tracksByKey[exo.getMediaItemAt(it).mediaId] }
+    }.orEmpty()
+
+    fun startSleepTimer(durationMs: Long) { sleepTimer?.start(durationMs) }
+    fun stopAfterCurrentTrack() { sleepTimer?.stopAfterTrack() }
+    fun cancelSleepTimer() { sleepTimer?.cancel() }
+
+    fun moveQueueTrack(from: String, to: String): Boolean {
+        val exo = player ?: return false
+        val byKey = tracksInQueue().associateBy { it.cacheKey }
+        val displayed = playbackOrderKeys().mapNotNull(byKey::get)
+        val moved = QueueReorder.move(displayed, currentTrack()?.cacheKey, laterKeys.toList(), from, to) ?: return false
+        applyQueuePreservingCurrent(moved.queue, moved.laterKeys)
+        if (exo.shuffleModeEnabled) {
+            exo.restorePlaybackOrder(displayed.map { it.cacheKey }.let { original ->
+                if (from in laterKeys) original else moved.queue.map { it.cacheKey }
+            })
+            priority?.refresh()
+        }
+        savePlayback()
+        publishSurface()
+        return true
+    }
+
+    private fun publishAudioInfo() {
+        if (destroying) return
+        val key = currentTrack()?.cacheKey
+        mutableAudioInfo.value = (audioFormats[key] ?: AudioInfo(trackKey = key)).copy(
+            location = audioLocations[key] ?: AudioLocation.UNKNOWN)
+    }
+
+    private fun publishSurface() {
+        if (destroying) return
+        val exo = player ?: return
+        // Connecting a controller to an idle service must retain the widget's saved song.
+        if (exo.mediaItemCount == 0 && !publishedQueue) return
+        if (exo.mediaItemCount > 0) publishedQueue = true
+        val artwork = exo.currentMediaItem?.mediaMetadata?.artworkUri?.takeIf { it.scheme == "file" }?.path
+        mutableSurface.value = PlaybackSurfaceState(currentTrack(), exo.isPlaying, exo.playWhenReady,
+            favoriteLiked, (application as ContainerHolder).container.isConnected(), artwork)
+    }
 
     fun logicalRepeatMode(): Int = priority?.repeatMode ?: Player.REPEAT_MODE_ALL
 
     private fun snapshot() = player?.playbackSnapshot(laterKeys.toList())?.copy(
+        playbackOrder = if (player?.shuffleModeEnabled == true) playbackOrderKeys() else emptyList(),
         repeat = when (logicalRepeatMode()) {
             Player.REPEAT_MODE_ONE -> RepeatMode.ONE
             Player.REPEAT_MODE_OFF -> RepeatMode.OFF
@@ -415,8 +534,9 @@ class PlaybackService : MediaSessionService() {
     )
 
     private fun savePlayback() {
+        if (destroying) return
         val state = snapshot() ?: return
-        scope.launch { (application as ContainerHolder).container.settings.setPlayback(state) }
+        persistPlayback((application as ContainerHolder).container.settings, state)
     }
 
     fun removeQueueTrack(mediaId: String): Boolean {
@@ -548,6 +668,7 @@ class PlaybackService : MediaSessionService() {
         val buttons = sessionButtons(liked)
         session?.setMediaButtonPreferences(buttons)
         session?.setCustomLayout(buttons)
+        publishSurface()
     }
 
     private fun refreshSessionButtons() {
@@ -558,6 +679,7 @@ class PlaybackService : MediaSessionService() {
             } else {
                 withContext(Dispatchers.IO) { isLoved(track) }
             }
+            if (currentTrack()?.cacheKey != track?.cacheKey) return@launch
             publishSessionButtons(liked)
         }
     }
@@ -613,7 +735,59 @@ class PlaybackService : MediaSessionService() {
             pending.startPositionMs,
             pending.laterKeys,
             pending.sourceListId,
+            pending.playbackOrder,
         )
+    }
+
+    /** Widget clicks operate the same player, including a cold process with a saved local queue. */
+    fun handleWidgetAction(action: String) {
+        val exo = player ?: return
+        if (exo.mediaItemCount > 0) {
+            when (action) {
+                ACTION_WIDGET_TOGGLE -> if (exo.playWhenReady) exo.pause() else recoverConnection(playRequested = true)
+                ACTION_WIDGET_NEXT -> { exo.seekToNextMediaItem(); exo.play() }
+                ACTION_WIDGET_PREVIOUS -> { exo.seekToPreviousMediaItem(); exo.play() }
+            }
+            return
+        }
+        if (widgetRestoreJob?.isActive == true) return
+        widgetRestoreJob = scope.launch {
+            val container = (application as ContainerHolder).container
+            try {
+                val restored = withTimeout(5_000) { withContext(Dispatchers.IO) {
+                    awaitPlaybackPersistence()
+                    val saved = container.settings.playback.first()
+                    val downloaded = container.downloads.observe().first().associateBy { it.cacheKey }
+                    val tracks = saved.cacheKeys.mapNotNull { key -> container.library.cachedTrack(key)
+                        ?: downloaded[key]?.let { record -> Track(record.identity, record.title, record.artist,
+                            "", null, fingerprint = record.fingerprint) } }
+                    saved to tracks
+                } }
+                if (exo.mediaItemCount > 0) { handleWidgetAction(action); return@launch }
+                val (saved, tracks) = restored
+                if (tracks.isEmpty()) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return@launch }
+                val current = tracks.firstOrNull { it.cacheKey == saved.currentKey } ?: tracks.first()
+                playTracks(tracks, current, saved.shuffled, saved.repeatMode(), saved.positionMs, saved.laterKeys,
+                    restoredPlaybackOrder = saved.playbackOrder)
+                if (action != ACTION_WIDGET_TOGGLE) handleWidgetAction(action)
+            } catch (cancelled: CancellationException) {
+                if (cancelled is kotlinx.coroutines.TimeoutCancellationException) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+                else throw cancelled
+            } catch (_: Exception) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+        }
+    }
+
+    private fun showWidgetStartingNotification() {
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = "widget_playback_start"
+        manager.createNotificationChannel(NotificationChannel(channel, getString(R.string.widget_playback_start), NotificationManager.IMPORTANCE_LOW))
+        val launch = packageManager.getLaunchIntentForPackage(packageName)
+        val notification = Notification.Builder(this, channel)
+            .setSmallIcon(R.drawable.ic_playback_note)
+            .setContentTitle(getString(R.string.widget_playback_start)).setOngoing(true)
+            .apply { if (launch != null) setContentIntent(PendingIntent.getActivity(this@PlaybackService, 0, launch,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)) }.build()
+        startForeground(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID, notification)
     }
 
     private fun recordRecentlyPlayed(cacheKey: String?) {
@@ -659,6 +833,27 @@ class PlaybackService : MediaSessionService() {
     }
 
     companion object Holder {
+        private val persistenceScope = AppScopes.create("playback-persistence", Dispatchers.IO)
+        @Volatile private var persistenceJob: Job? = null
+        suspend fun awaitPlaybackPersistence() { persistenceJob?.join() }
+        // Calls originate on the player's main thread. Writes survive service destruction and
+        // retain event order; DataStore transforms must never be waited on by a blocked main thread.
+        private fun persistPlayback(settings: AppSettingsStore, state: PersistedPlayback) {
+            val previous = persistenceJob
+            persistenceJob = persistenceScope.launch { previous?.join(); settings.setPlayback(state) }
+        }
+        const val ACTION_WIDGET_TOGGLE = "io.github.nutea.anylisten.WIDGET_TOGGLE"
+        const val ACTION_WIDGET_NEXT = "io.github.nutea.anylisten.WIDGET_NEXT"
+        const val ACTION_WIDGET_PREVIOUS = "io.github.nutea.anylisten.WIDGET_PREVIOUS"
+        private val WIDGET_ACTIONS = setOf(ACTION_WIDGET_TOGGLE, ACTION_WIDGET_NEXT, ACTION_WIDGET_PREVIOUS)
+        private val mutableEffects = MutableStateFlow(io.github.nutea.anylisten.core.model.AudioEffectsState())
+        val audioEffects = mutableEffects.asStateFlow()
+        private val mutableSleepTimer = MutableStateFlow(SleepTimerState())
+        val sleepTimerState = mutableSleepTimer.asStateFlow()
+        private val mutableAudioInfo = MutableStateFlow(AudioInfo())
+        val audioInfo = mutableAudioInfo.asStateFlow()
+        private val mutableSurface = MutableStateFlow<PlaybackSurfaceState?>(null)
+        val surfaceState = mutableSurface.asStateFlow()
         const val COMMAND_FAVORITE = "io.github.nutea.anylisten.FAVORITE"
         const val COMMAND_PLAY_MODE = "io.github.nutea.anylisten.PLAY_MODE"
         private const val MIN_PREPARE_INTERVAL_MS = 2_000L

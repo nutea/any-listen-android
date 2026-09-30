@@ -58,6 +58,7 @@ fun AnyListenRoot(
     @Suppress("UNUSED_PARAMETER") container: AppContainer,
     playLast: Boolean = false,
     vm: AppViewModel = viewModel(),
+    openPlayerRequest: Int = 0,
 ) {
     val signedIn by vm.signedIn.collectAsState()
     LaunchedEffect(playLast, signedIn) {
@@ -75,6 +76,9 @@ fun AnyListenRoot(
     io.github.nutea.anylisten.ui.screens.LibraryDialogs(vm)
     RequestNotificationPermission()
     val nav = rememberNavController()
+    LaunchedEffect(openPlayerRequest) {
+        if (openPlayerRequest > 0) nav.navigate("player") { launchSingleTop = true }
+    }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val playerStyle by vm.playerStyle.collectAsState()
@@ -88,7 +92,7 @@ fun AnyListenRoot(
     val motion = rememberMotionEnabled()
     val hapticView = LocalView.current
     if (requestedSheet == "queue" && route != "player") {
-        QueueBottomSheet(player, vm::artworkUrl, vm::playQueueItem, vm::removeQueueItem, vm::consumePlayerSheet)
+        QueueBottomSheet(player, vm::artworkUrl, vm::playQueueItem, vm::removeQueueItem, vm::consumePlayerSheet, vm::moveQueueItem)
     }
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
     Scaffold(

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal"
+    android:gravity="center_vertical" android:padding="16dp" android:background="@drawable/widget_background">
+    <ImageView android:id="@+id/widget_cover" android:layout_width="72dp" android:layout_height="72dp"
+        android:layout_marginEnd="12dp" android:scaleType="centerCrop" android:src="@drawable/widget_note"
+        android:background="@drawable/widget_cover_background" android:contentDescription="@string/widget_open" />
+    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout android:id="@+id/widget_titles" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/app_name" android:textColor="#F4F7FA" android:textSize="16sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/widget_artist" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" android:text="@string/widget_empty" android:textColor="#AEBEC9" android:textSize="12sp" android:maxLines="1" android:ellipsize="end" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="4dp" android:gravity="center_vertical" android:orientation="horizontal">
+            <ImageButton android:id="@+id/widget_favorite" android:layout_width="48dp" android:layout_height="48dp" android:padding="12dp"
+                android:src="@drawable/widget_heart" android:background="@android:color/transparent" android:contentDescription="@string/cd_favorite" />
+            <ImageButton android:id="@+id/widget_previous" android:layout_width="48dp" android:layout_height="48dp" android:padding="10dp"
+                android:src="@drawable/widget_previous" android:background="@android:color/transparent" android:contentDescription="@string/cd_previous" />
+            <ImageButton android:id="@+id/widget_toggle" android:layout_width="48dp" android:layout_height="48dp" android:padding="10dp"
+                android:src="@drawable/widget_play" android:tint="#16252D" android:background="@drawable/widget_play_background" android:contentDescription="@string/cd_play" />
+            <ImageButton android:id="@+id/widget_next" android:layout_width="48dp" android:layout_height="48dp" android:padding="10dp"
+                android:src="@drawable/widget_next" android:background="@android:color/transparent" android:contentDescription="@string/cd_next" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

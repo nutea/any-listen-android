@@ -21,14 +21,15 @@ import io.github.nutea.anylisten.core.model.Playlist
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddToPlaylistSheet(playlists: List<Playlist>, selectedCount: Int,
-    artwork: (Playlist) -> String?, onSelect: (Playlist) -> Unit, onDismiss: () -> Unit) {
+    artwork: (Playlist) -> String?, onSelect: (Playlist) -> Unit, onDismiss: () -> Unit,
+    moving: Boolean = false, duplicates: (Playlist) -> Int = { 0 }) {
     ModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).testTag("add_playlist_sheet")) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.add_to_playlist), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(if (moving) R.string.playlist_move_tracks else R.string.add_to_playlist), style = MaterialTheme.typography.titleLarge)
                     Text(stringResource(R.string.add_playlist_selection, selectedCount),
                         Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -52,6 +53,9 @@ fun AddToPlaylistSheet(playlists: List<Playlist>, selectedCount: Int,
                         Column(Modifier.weight(1f)) {
                             Text(playlistName(playlist), style = MaterialTheme.typography.titleMedium,
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            val duplicateCount = duplicates(playlist)
+                            if (duplicateCount > 0) Text(stringResource(if (moving) R.string.playlist_move_duplicates else R.string.playlist_duplicate_hint, duplicateCount),
+                                Modifier.testTag("playlist_duplicates_${playlist.id}"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                             Text(stringResource(R.string.track_count, playlist.trackCount), Modifier.padding(top = 4.dp),
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

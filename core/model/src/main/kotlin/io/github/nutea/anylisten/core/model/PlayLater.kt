@@ -1,12 +1,13 @@
 package io.github.nutea.anylisten.core.model
 
-enum class TrackSortField { TITLE, ARTIST, ALBUM, PLAY_TIME }
+enum class TrackSortField { TITLE, ARTIST, ALBUM, PLAY_TIME, SERVER_ORDER }
 
 object TrackSort {
     /** Play time defaults to newest first; other fields default A→Z. */
     fun defaultAscending(field: TrackSortField): Boolean = field != TrackSortField.PLAY_TIME
 
     fun apply(tracks: List<Track>, field: TrackSortField, ascending: Boolean): List<Track> {
+        if (field == TrackSortField.SERVER_ORDER) return if (ascending) tracks else tracks.reversed()
         if (field == TrackSortField.PLAY_TIME) {
             // Caller must pass recency order (newest first). Ascending shows oldest first.
             return if (ascending) tracks.reversed() else tracks
@@ -15,7 +16,7 @@ object TrackSort {
             TrackSortField.TITLE -> { track -> track.title }
             TrackSortField.ARTIST -> { track -> track.artist }
             TrackSortField.ALBUM -> { track -> track.album }
-            TrackSortField.PLAY_TIME -> { _ -> "" }
+            TrackSortField.PLAY_TIME, TrackSortField.SERVER_ORDER -> { _ -> "" }
         }
         return if (ascending) tracks.sortedBy { selected(it).lowercase() }
         else tracks.sortedByDescending { selected(it).lowercase() }

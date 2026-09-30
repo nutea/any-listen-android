@@ -17,6 +17,10 @@ data class SessionInfo(
  * `SessionConnectionManager`; a gateway only knows how to ask a live session for data.
  */
 interface AnyListenGateway {
+    suspend fun setPlaylistOrder(listId: String, original: List<String>, ordered: List<String>) { error("Unsupported") }
+    suspend fun reorderPlaylistTracks(listId: String, fromId: String, toId: String) { error("Unsupported") }
+    suspend fun movePlaylistTracks(fromId: String, toId: String, ids: List<String>) { error("Unsupported") }
+    suspend fun appendPlaylistTracks(listId: String, tracks: List<Track>) { error("Unsupported") }
     suspend fun editPlaylist(edit: io.github.nutea.anylisten.core.model.PlaylistEdit)
     suspend fun refreshLibrary(): LibrarySnapshot
     suspend fun refreshLibrary(cached: LibrarySnapshot, changedPlaylistIds: Set<String>): LibrarySnapshot = refreshLibrary()

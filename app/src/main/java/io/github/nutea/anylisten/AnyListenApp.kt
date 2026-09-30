@@ -12,5 +12,6 @@ class AnyListenApp : Application(), ContainerHolder {
         super.onCreate()
         container = AppContainer(this)
         container.start()
+        io.github.nutea.anylisten.widget.PlaybackWidget.observe(this)
     }
 }

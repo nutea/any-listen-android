@@ -16,6 +16,7 @@ class PersistedPlaybackTest {
             repeat = RepeatMode.ONE.name,
             positionMs = 12_345,
             laterKeys = listOf("b"),
+            playbackOrder = listOf("b", "a"),
         )
         val restored = PersistedPlayback.decode(saved.encode())
         assertEquals(saved, restored)
@@ -27,5 +28,12 @@ class PersistedPlaybackTest {
         assertTrue(PersistedPlayback.decode(null).cacheKeys.isEmpty())
         assertTrue(PersistedPlayback.decode("{").cacheKeys.isEmpty())
         assertEquals(RepeatMode.ALL, PersistedPlayback.decode("""{"repeat":"NOPE"}""").repeatMode())
+    }
+
+    @Test fun olderQueuesRemainReadableWithoutShuffleTraversal() {
+        val restored = PersistedPlayback.decode("""{"cacheKeys":["a","b"],"currentKey":"b","positionMs":12345,"shuffled":true}""")
+        assertEquals(listOf("a", "b"), restored.cacheKeys)
+        assertEquals(12345L, restored.positionMs)
+        assertTrue(restored.playbackOrder.isEmpty())
     }
 }

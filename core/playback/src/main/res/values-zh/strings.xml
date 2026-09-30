@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="widget_playback_start">正在准备播放</string>
     <string name="session_favorite">收藏</string>
     <string name="session_unfavorite">取消收藏</string>
     <string name="session_play_mode_list_loop">列表循环</string>

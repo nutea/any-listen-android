@@ -32,6 +32,7 @@
 | Kotlin / kotlinx.coroutines / kotlinx.serialization | 语言、协程与序列化 | [Kotlin](https://github.com/JetBrains/kotlin)、[coroutines 1.10.2 LICENSE](https://github.com/Kotlin/kotlinx.coroutines/blob/1.10.2/LICENSE.txt)、[serialization](https://github.com/Kotlin/kotlinx.serialization) |
 | OkHttp 4.12.0 | 网络请求 | [Apache-2.0](https://github.com/square/okhttp/blob/parent-4.12.0/LICENSE.txt) |
 | Coil 2.7.0 | 图片加载 | [Apache-2.0](https://github.com/coil-kt/coil/blob/2.7.0/LICENSE.txt) |
+| TinyPinyin 2.0.3 / Aho-Corasick 0.3.0 | 拼音与首字母搜索 | [TinyPinyin 原始许可证](../third_party/tinypinyin/LICENSE)与[版本来源说明](../third_party/tinypinyin/README.md)；传递依赖按发布清单保留 Apache-2.0 许可与通知 |
 | Gradle / Android Gradle Plugin / KSP | 构建工具 | [Gradle](https://github.com/gradle/gradle)、[AGP](https://android.googlesource.com/platform/tools/base/)、[KSP](https://github.com/google/ksp) |
 | JUnit / Robolectric / AndroidX Test | 测试，不作为正式应用功能分发 | [JUnit 4](https://github.com/junit-team/junit4)、[Robolectric](https://github.com/robolectric/robolectric)、[AndroidX Test](https://github.com/android/android-test) |
 
