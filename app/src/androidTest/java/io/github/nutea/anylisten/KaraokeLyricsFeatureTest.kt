@@ -54,7 +54,8 @@ class KaraokeLyricsFeatureTest {
         screenshot("karaoke-romanization")
         compose.onNodeWithText("風が吹く").performClick()
         compose.runOnIdle { assertEquals(1200L, seek) }
-        compose.onNodeWithContentDescription(label(R.string.lyric_settings)).performClick()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("lyrics_settings_button").performScrollTo().performClick()
         screenshot("karaoke-settings")
         compose.onNodeWithTag("lyric_romanization_toggle").performClick()
         compose.onNodeWithTag("lyric_karaoke_toggle").performClick()

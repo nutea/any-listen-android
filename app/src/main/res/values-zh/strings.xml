@@ -218,7 +218,10 @@
     <string name="custom_playlists_empty">还没有自定义歌单</string>
     <string name="library_search_hint">搜索歌名、歌手、专辑</string>
     <string name="library_search_scope">搜索所有已同步歌单，相同歌曲合并展示。</string>
-    <string name="library_search_offline">离线搜索已同步的音乐库；仅完整缓存或下载的歌曲可播放。</string>
+    <string name="library_search_offline">离线模式；仅完整缓存或下载的歌曲可播放。</string>
+    <string name="library_search_playlist_hint">搜索此歌单的歌名、歌手、专辑</string>
+    <string name="library_search_playlist_scope">搜索范围：%1$s</string>
+    <string name="library_search_playlist_missing">此歌单已不存在，请返回后重新选择。</string>
     <string name="library_search_start">搜索你的音乐库</string>
     <string name="library_search_results">找到 %1$d 首歌曲</string>
     <string name="library_search_origins">所属歌单：%1$s</string>
@@ -359,4 +362,11 @@
     <string name="smart_library_title">智能曲库</string>
     <string name="smart_library_subtitle">经常听、久未听与听歌统计</string>
     <string name="lyric_candidates_empty">未找到候选歌词，可以修改歌名或歌手、更换来源，或导入 LRC 文件。</string>
+    <string name="player_details">歌曲详情与更多操作</string>
+    <string name="player_details_downloaded">已下载，随时离线收听</string>
+    <string name="player_details_cached">已缓存，可离线收听</string>
+    <string name="player_metadata_missing">暂无专辑信息</string>
+    <string name="player_effects_summary">%1$.2f× · 保持音高</string>
+    <string name="player_audio_summary">格式、码率、采样率与音频来源</string>
+    <string name="player_lyrics_summary">双语、罗马音、逐字与时间偏移</string>
 </resources>

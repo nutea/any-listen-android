@@ -29,7 +29,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
@@ -159,11 +158,7 @@ fun PlayerContent(
                     }
                 }
             }
-            if (pager.currentPage == 1 && track != null) IconButton(onClick = { sheet = "lyrics" }) {
-                Icon(Icons.Default.Tune, stringResource(R.string.lyric_settings))
-            } else IconButton(onClick = { sheet = "style" }) {
-                Icon(Icons.Default.Palette, stringResource(R.string.player_style))
-            }
+            Spacer(Modifier.size(48.dp))
         }
         if (track == null) {
             EmptyContent(Icons.Default.MusicNote, stringResource(R.string.player_empty), stringResource(R.string.player_empty_detail),
@@ -189,19 +184,18 @@ fun PlayerContent(
                             ?: lines.firstOrNull { it.text.isNotBlank() }?.text
                             ?: state.lyrics?.raw?.lineSequence()?.firstOrNull { it.isNotBlank() && !it.startsWith("[") }
                             ?: stringResource(R.string.lyrics_empty)
-                        Text(track.title, style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 8.dp))
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(track.title, style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f))
+                            PlayerFavorite(favorite, offline, actions.favorite)
+                        }
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             if (track.artist.isNotBlank()) TextButton(onClick = actions.artist,
                                 modifier = Modifier.weight(1f).testTag("player_artist"), contentPadding = PaddingValues(end = 8.dp)) {
-                                Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                Icon(Icons.Default.ChevronRight, null, Modifier.size(16.dp))
-                            }
-                            if (track.album.isNotBlank()) TextButton(onClick = actions.album,
-                                modifier = Modifier.weight(1f).testTag("player_album"), contentPadding = PaddingValues(start = 8.dp)) {
-                                Icon(Icons.Default.Album, null, Modifier.padding(end = 4.dp).size(16.dp))
-                                Text(track.album, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                Icon(Icons.Default.ChevronRight, null, Modifier.size(16.dp))
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                    Icon(Icons.Default.ChevronRight, null, Modifier.size(16.dp))
+                                }
                             }
                             if (state.availableOffline) Icon(Icons.Default.OfflinePin, stringResource(R.string.track_available_offline),
                                 Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
@@ -209,26 +203,15 @@ fun PlayerContent(
                         Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.fillMaxWidth().testTag("cover_lyric_preview").clickable { showPage(1) }
-                                .padding(horizontal = 8.dp, vertical = 16.dp))
-                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            IconButton(onClick = actions.favorite, enabled = !offline) {
-                                Icon(if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    stringResource(if (favorite) R.string.cd_unfavorite else R.string.cd_favorite))
-                            }
-                            IconButton(onClick = actions.comments) { Icon(Icons.Default.Comment, stringResource(R.string.song_comments)) }
-                            IconButton(onClick = actions.download, enabled = !downloaded) {
-                                Icon(if (downloaded) Icons.Default.DownloadDone else Icons.Default.Download,
-                                    stringResource(if (downloaded) R.string.cd_downloaded else R.string.cd_download))
-                            }
-                            IconButton(onClick = actions.more, enabled = !offline) {
-                                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.cd_add_to_playlist))
-                            }
-                        }
+                                .padding(vertical = 16.dp))
                     }
                 } else {
                     Column(Modifier.fillMaxSize().testTag("lyrics_page")) {
-                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 8.dp, top = 8.dp))
+                        Row(Modifier.fillMaxWidth().padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f))
+                            PlayerFavorite(favorite, offline, actions.favorite)
+                        }
                         Text(track.artist.ifBlank { source.orEmpty() }, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable(enabled = track.artist.isNotBlank(), onClick = actions.artist).padding(start = 8.dp, top = 4.dp, bottom = 4.dp))
@@ -237,20 +220,23 @@ fun PlayerContent(
                 }
             }
             state.error?.let { Notice(it, error = true) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { sheet = "sleep" }, modifier = Modifier.weight(1f).testTag("sleep_timer_button")) {
-                    Icon(Icons.Default.Bedtime, null, Modifier.size(16.dp))
-                    Text(sleepTimerLabel(state.sleepTimer, compact = true), Modifier.padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (state.sleepTimer.active) AssistChip(onClick = { sheet = "sleep" },
+                    modifier = Modifier.testTag("active_sleep_timer"),
+                    label = { Text(sleepTimerLabel(state.sleepTimer, compact = true), maxLines = 1) },
+                    leadingIcon = { Icon(Icons.Default.Bedtime, null, Modifier.size(16.dp)) })
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = actions.download, enabled = !downloaded, modifier = Modifier.testTag("player_download")) {
+                    Icon(if (downloaded) Icons.Default.DownloadDone else Icons.Default.Download,
+                        stringResource(if (downloaded) R.string.cd_downloaded else R.string.cd_download))
                 }
-                IconButton(onClick = { sheet = "effects" }, modifier = Modifier.testTag("audio_effects_button")) {
-                    Icon(Icons.Default.Tune, stringResource(R.string.audio_effects_title))
+                IconButton(onClick = actions.comments, modifier = Modifier.testTag("player_comments")) {
+                    Icon(Icons.Default.Comment, stringResource(R.string.song_comments))
                 }
-                TextButton(onClick = { sheet = "audio" }, modifier = Modifier.weight(1f).testTag("audio_info_button")) {
-                    Icon(Icons.Default.Info, null, Modifier.size(16.dp))
-                    Text(stringResource(R.string.audio_info), Modifier.padding(start = 6.dp), maxLines = 1)
+                IconButton(onClick = { sheet = "details" }, modifier = Modifier.testTag("player_more")) {
+                    Icon(Icons.Default.MoreVert, stringResource(R.string.player_details))
                 }
             }
-            // Sound controls stay reachable in both the artwork and lyrics pages.
             PlaybackSlider(state, actions.seek)
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -274,6 +260,9 @@ fun PlayerContent(
     sheet?.let { showing ->
         ModalBottomSheet(onDismissRequest = { sheet = null }, containerColor = MaterialTheme.colorScheme.surfaceContainer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             when (showing) {
+                "details" -> track?.let { PlayerDetailsContent(state, cover, downloaded, offline, effects,
+                    open = { sheet = it }, addToPlaylist = { sheet = null; actions.more() },
+                    artist = { sheet = null; actions.artist() }, album = { sheet = null; actions.album() }) }
                 "style" -> Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(stringResource(R.string.player_style), style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))

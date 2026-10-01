@@ -22,11 +22,16 @@ import androidx.navigation.compose.NavHost
 
 private val PageEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
+const val PLAYLIST_SEARCH_ROUTE = "search/playlist/{playlistId}"
+fun librarySearchRoute(playlistId: String? = null): String =
+    if (playlistId == null) "search" else "search/playlist/${android.net.Uri.encode(playlistId)}"
+fun isLibrarySearchRoute(route: String?): Boolean = route == "search" || route?.startsWith("search/playlist/") == true
+
 /** Paired opaque pages move edge-to-edge, without fading text through each other. */
 @Composable
 fun LibraryNavHost(nav: NavHostController, modifier: Modifier = Modifier,
     motion: Boolean = rememberMotionEnabled(), builder: NavGraphBuilder.() -> Unit) {
-    fun detail(route: String?) = route == "search" || route?.startsWith("playlist/") == true || isCatalogRoute(route)
+    fun detail(route: String?) = isLibrarySearchRoute(route) || route?.startsWith("playlist/") == true || isCatalogRoute(route)
     NavHost(navController = nav, startDestination = "library", modifier = modifier.clipToBounds(),
         enterTransition = {
             if (motion && detail(targetState.destination.route) && initialState.destination.route != "player")

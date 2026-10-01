@@ -50,7 +50,8 @@ class PlayerStyleTest {
                 PlayerActions({}, { toggles++ }, {}, {}, {}, {}, {}, {}, {}, style = { style = it }), style = style)
         } }
         compose.onNodeWithTag("immersive_background").assertDoesNotExist()
-        compose.onNodeWithContentDescription(label(R.string.player_style)).performClick()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("player_style_button").performScrollTo().performClick()
         compose.onNodeWithTag("player_style_IMMERSIVE").performClick()
         compose.onNodeWithTag("immersive_background").assertExists()
         // Wait for the asynchronous local image and palette, independently of server access.
@@ -65,7 +66,8 @@ class PlayerStyleTest {
         compose.onNodeWithText(label(R.string.cover_tab)).performClick()
         compose.runOnIdle { dark = true }
         screenshot("player-immersive-dark")
-        compose.onNodeWithContentDescription(label(R.string.player_style)).performClick()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("player_style_button").performScrollTo().performClick()
         compose.onNodeWithTag("player_style_CLASSIC").performClick()
         compose.onNodeWithTag("immersive_background").assertDoesNotExist()
         compose.onNodeWithTag("cover_page").assertIsDisplayed()

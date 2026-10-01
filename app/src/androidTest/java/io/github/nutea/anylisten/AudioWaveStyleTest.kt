@@ -72,7 +72,8 @@ class AudioWaveStyleTest {
         compose.setContent { AnyListenTheme { PlayerContent(state, { cover }, false, false,
             PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, style = { style = it }), style = style) } }
         for (option in PlayerStyle.entries.filter { it.hasWave }) {
-            compose.onNodeWithContentDescription(label(R.string.player_style)).performClick()
+            compose.onNodeWithTag("player_more").performClick()
+            compose.onNodeWithTag("player_style_button").performScrollTo().performClick()
             compose.onNodeWithTag("player_style_${option.name}").performScrollTo().performClick()
             compose.onNodeWithTag("audio_wave_${option.name}").assertIsDisplayed()
             compose.onNodeWithContentDescription(label(R.string.cd_play)).assertIsDisplayed()

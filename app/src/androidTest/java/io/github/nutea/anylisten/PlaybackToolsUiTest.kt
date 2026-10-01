@@ -109,12 +109,14 @@ class PlaybackToolsUiTest {
             sleepStart = { state = state.copy(sleepTimer = SleepTimerState(remainingMs = it)) },
             sleepCancel = { state = state.copy(sleepTimer = SleepTimerState()) })
         compose.setContent { AnyListenTheme { PlayerContent(state, { null }, false, false, controls, downloaded = true, style = style) } }
+        compose.onNodeWithTag("player_more").performClick()
         compose.onNodeWithTag("sleep_timer_button").assertIsDisplayed().performClick()
         capture("playback-timer-sheet")
         compose.onNodeWithTag("sleep_preset_30").performClick()
         compose.onNodeWithTag("sleep_timer_sheet").assertDoesNotExist()
-        compose.onNodeWithTag("sleep_timer_button").assertIsDisplayed()
-        compose.onNodeWithTag("audio_info_button").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("active_sleep_timer").assertIsDisplayed()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("audio_info_button").performScrollTo().performClick()
         capture("playback-audio-sheet")
         compose.onNodeWithText("923 kbps").assertIsDisplayed()
         instrumentation.uiAutomation.executeShellCommand("input keyevent 4").let {
@@ -122,8 +124,9 @@ class PlaybackToolsUiTest {
         }
         compose.onNodeWithTag("audio_info_sheet").assertDoesNotExist()
         compose.runOnIdle { style = PlayerStyle.IMMERSIVE }
-        compose.onNodeWithTag("sleep_timer_button").assertIsDisplayed()
-        compose.onNodeWithTag("audio_info_button").assertIsDisplayed()
+        compose.onNodeWithTag("active_sleep_timer").assertIsDisplayed()
+        compose.onNodeWithTag("player_more").assertIsDisplayed()
+        compose.onNodeWithTag("audio_info_button").assertDoesNotExist()
         compose.onNodeWithContentDescription(context.getString(R.string.cd_pause)).assertIsDisplayed()
         capture("playback-tools-immersive")
     }

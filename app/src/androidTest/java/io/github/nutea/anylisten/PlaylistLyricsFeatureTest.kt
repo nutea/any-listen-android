@@ -111,7 +111,8 @@ class PlaylistLyricsFeatureTest {
         compose.onNodeWithText(label(R.string.open_lyrics)).performClick()
         compose.onNodeWithText("翻译歌词").assertExists()
         screenshot("bilingual-lyrics")
-        compose.onNodeWithContentDescription(label(R.string.lyric_settings)).performClick()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("lyrics_settings_button").performScrollTo().performClick()
         compose.onNodeWithTag("lyric_translation_toggle").performClick()
         compose.onNodeWithText(label(R.string.lyric_later)).performClick()
         compose.onNodeWithTag("lyric_offset_value").assertTextEquals(label(R.string.lyric_offset, 100L))
@@ -120,7 +121,8 @@ class PlaylistLyricsFeatureTest {
         compose.onNodeWithText("翻译歌词").assertDoesNotExist()
         compose.onNodeWithText("Original line").performClick()
         compose.runOnIdle { assertEquals(1100L, seek) }
-        compose.onNodeWithContentDescription(label(R.string.lyric_settings)).performClick()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("lyrics_settings_button").performScrollTo().performClick()
         compose.onNodeWithText(label(R.string.lyric_offset_reset)).performClick()
         compose.onNodeWithTag("lyric_offset_value").assertTextEquals(label(R.string.lyric_offset, 0L))
     }

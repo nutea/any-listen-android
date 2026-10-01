@@ -30,7 +30,7 @@ import io.github.nutea.anylisten.core.model.*
 import io.github.nutea.anylisten.ui.AppViewModel
 
 @Composable
-fun LibrarySearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPlayer: () -> Unit) {
+fun LibrarySearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPlayer: () -> Unit, playlistId: String? = null) {
     val state by vm.library.collectAsState()
     val player by vm.player.collectAsState()
     val downloadedKeys = downloadedTrackKeys(vm)
@@ -39,7 +39,7 @@ fun LibrarySearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPlayer: () -
     LibrarySearchContent(state.snapshot, player.track?.cacheKey, vm::artworkUrl, vm::isFavorite, vm::isAvailableOffline, onBack,
         { tracks, track -> if (track.cacheKey == player.track?.cacheKey) onOpenPlayer() else vm.play(tracks, track) }, downloaded = { it.cacheKey in downloadedKeys }, isPlaying = player.isPlaying,
         history = history, stats = stats, downloadedKeys = downloadedKeys, rememberSearch = vm::rememberSearch,
-        clearHistory = vm::clearSearchHistory) { track, action ->
+        clearHistory = vm::clearSearchHistory, playlistId = playlistId) { track, action ->
         when(action) {
             TrackAction.FAVORITE -> vm.toggleFavorite(track)
             TrackAction.ADD -> vm.startAddToPlaylist(track)
@@ -56,16 +56,19 @@ fun LibrarySearchContent(snapshot: LibrarySnapshot, currentKey: String?, artwork
     favorite: (Track) -> Boolean, offlineReady: (Track) -> Boolean, onBack: () -> Unit,
     onPlay: (List<Track>, Track) -> Unit, downloaded: (Track) -> Boolean = { false }, isPlaying: Boolean = false,
     history: List<String> = emptyList(), stats: List<ListeningStat> = emptyList(), downloadedKeys: Set<String> = emptySet(),
-    rememberSearch: (String) -> Unit = {}, clearHistory: () -> Unit = {}, onAction: (Track, TrackAction) -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var menuTrack by remember { mutableStateOf<Track?>(null) }
-    var onlyDownloaded by rememberSaveable { mutableStateOf(false) }
-    var smart by rememberSaveable { mutableStateOf(SmartLibrary.ALL) }
-    var randomSeed by rememberSaveable { mutableIntStateOf(0) }
-    val index by produceState<LibrarySearch.Index?>(null, snapshot) {
-        value = withContext(Dispatchers.Default) { LibrarySearch.index(snapshot) }
-    }
-    val results by produceState<List<LibrarySearchHit>>(emptyList(), index, query, smart, randomSeed, stats, onlyDownloaded, downloadedKeys) {
+    rememberSearch: (String) -> Unit = {}, clearHistory: () -> Unit = {}, playlistId: String? = null,
+    onAction: (Track, TrackAction) -> Unit) {
+    val scopePlaylist = snapshot.playlists.firstOrNull { it.id == playlistId }
+    val scopeUnavailable = playlistId != null && scopePlaylist == null
+    var query by rememberSaveable(playlistId) { mutableStateOf("") }
+    var menuTrack by remember(playlistId) { mutableStateOf<Track?>(null) }
+    var onlyDownloaded by rememberSaveable(playlistId) { mutableStateOf(false) }
+    var smart by rememberSaveable(playlistId) { mutableStateOf(SmartLibrary.ALL) }
+    var randomSeed by rememberSaveable(playlistId) { mutableIntStateOf(0) }
+    val index by key(playlistId) { produceState<LibrarySearch.Index?>(null, snapshot) {
+        value = withContext(Dispatchers.Default) { LibrarySearch.index(snapshot, playlistId) }
+    } }
+    val results by key(playlistId) { produceState<List<LibrarySearchHit>>(emptyList(), index, query, smart, randomSeed, stats, onlyDownloaded, downloadedKeys) {
         value = withContext(Dispatchers.Default) {
             val base = if (query.isBlank()) index?.all.orEmpty() else index?.find(query).orEmpty()
             val eligible = base.filter { !onlyDownloaded || it.track.cacheKey in downloadedKeys }
@@ -73,31 +76,39 @@ fun LibrarySearchContent(snapshot: LibrarySnapshot, currentKey: String?, artwork
             val hits = base.associateBy { it.track.cacheKey }
             selected.mapNotNull { hits[it.cacheKey] }
         }
-    }
+    } }
     val keyboard = LocalSoftwareKeyboardController.current
     Column(Modifier.fillMaxSize().testTag("library_search")) {
         Row(Modifier.padding(end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { keyboard?.hide(); onBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back_to_library)) }
-            OutlinedTextField(query, { query = it }, singleLine = true,
-                placeholder = { Text(stringResource(R.string.library_search_hint), style = MaterialTheme.typography.bodyMedium) },
+            OutlinedTextField(query, { query = it }, singleLine = true, enabled = !scopeUnavailable,
+                placeholder = { Text(stringResource(if (playlistId == null) R.string.library_search_hint else R.string.library_search_playlist_hint), style = MaterialTheme.typography.bodyMedium) },
                 trailingIcon = { if(query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, stringResource(R.string.clear_search)) } },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { rememberSearch(query); keyboard?.hide() }), modifier = Modifier.weight(1f).testTag("library_search_input"))
         }
-        Text(stringResource(if (snapshot.offline) R.string.library_search_offline else R.string.library_search_scope), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(when {
+            scopeUnavailable -> stringResource(R.string.library_search_playlist_missing)
+            scopePlaylist != null -> stringResource(R.string.library_search_playlist_scope, playlistName(scopePlaylist))
+            else -> stringResource(R.string.library_search_scope)
+        }, Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("library_search_scope"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (snapshot.offline) Text(stringResource(R.string.library_search_offline), Modifier.padding(horizontal = 20.dp).padding(bottom = 8.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(onlyDownloaded, { onlyDownloaded = !onlyDownloaded }, label = { Text(stringResource(R.string.search_downloaded)) }, modifier = Modifier.testTag("search_downloaded"))
+            FilterChip(onlyDownloaded, { onlyDownloaded = !onlyDownloaded }, enabled = !scopeUnavailable, label = { Text(stringResource(R.string.search_downloaded)) }, modifier = Modifier.testTag("search_downloaded"))
             SmartLibrary.entries.forEach { mode ->
-                FilterChip(smart == mode, { smart = mode; if (mode == SmartLibrary.RANDOM) randomSeed++ }, label = { Text(stringResource(when(mode) {
+                FilterChip(smart == mode, { smart = mode; if (mode == SmartLibrary.RANDOM) randomSeed++ }, enabled = !scopeUnavailable, label = { Text(stringResource(when(mode) {
                     SmartLibrary.ALL -> R.string.smart_all; SmartLibrary.FREQUENT -> R.string.smart_frequent
                     SmartLibrary.REDISCOVER -> R.string.smart_rediscover; SmartLibrary.RANDOM -> R.string.smart_random
                 })) }, modifier = Modifier.testTag("smart_${mode.name}"))
             }
         }
-        val keys = remember(snapshot) { snapshot.tracksByPlaylist.values.flatten().map { it.cacheKey }.toSet() }
+        val keys = remember(index) { index?.all.orEmpty().map { it.track.cacheKey }.toSet() }
         val libraryStats = stats.filter { it.trackKey in keys }
         Text(stringResource(R.string.listening_summary, libraryStats.sumOf { it.plays }, libraryStats.sumOf { it.listenedMs } / 60000),
             Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (query.isBlank() && smart == SmartLibrary.ALL && !onlyDownloaded) {
+        if (scopeUnavailable) {
+            Spacer(Modifier.weight(1f))
+        } else if (query.isBlank() && smart == SmartLibrary.ALL && !onlyDownloaded) {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {

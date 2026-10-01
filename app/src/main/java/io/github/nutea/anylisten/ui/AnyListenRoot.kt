@@ -112,7 +112,7 @@ fun AnyListenRoot(
                         "settings" to (R.string.nav_settings to Icons.Filled.Settings),
                     ).forEach { (target, spec) ->
                         NavigationBarItem(
-                            selected = route == target || (target == "library" && (route == "search" || route?.startsWith("playlist/") == true || isCatalogRoute(route))),
+                            selected = route == target || (target == "library" && (isLibrarySearchRoute(route) || route?.startsWith("playlist/") == true || isCatalogRoute(route))),
                             onClick = {
                                 nav.selectMainTab(target)
                             },
@@ -131,7 +131,7 @@ fun AnyListenRoot(
                         vm.openPlaylist(playlist)
                         nav.navigate("playlist/${android.net.Uri.encode(playlist.id)}") { launchSingleTop = true }
                     }
-                }, { if (nav.acceptsInput(entry)) nav.navigate("search") { launchSingleTop = true } },
+                }, { if (nav.acceptsInput(entry)) nav.navigate(librarySearchRoute()) { launchSingleTop = true } },
                     onArtists = { if (nav.acceptsInput(entry)) nav.navigate("catalog/artists") },
                     onAlbums = { if (nav.acceptsInput(entry)) nav.navigate("catalog/albums") })
             }
@@ -147,7 +147,7 @@ fun AnyListenRoot(
                     androidx.compose.runtime.key(id) {
                         PlaylistScreen(vm,
                             { if (nav.acceptsInput(entry)) nav.popBackStack() },
-                            { if (nav.acceptsInput(entry)) nav.navigate("search") },
+                            { if (nav.acceptsInput(entry)) id?.let { nav.navigate(librarySearchRoute(it)) } },
                             { if (nav.acceptsInput(entry)) nav.navigate("player") },
                             canInteract = { nav.acceptsInput(entry) })
                     }
@@ -155,6 +155,10 @@ fun AnyListenRoot(
             }
             libraryPage("search") {
                 LibrarySearchScreen(vm, { nav.popBackStack() }, { nav.navigate("player") })
+            }
+            libraryPage(PLAYLIST_SEARCH_ROUTE) { entry ->
+                LibrarySearchScreen(vm, { nav.popBackStack() }, { nav.navigate("player") },
+                    playlistId = entry.arguments?.getString("playlistId").orEmpty())
             }
             libraryPage("catalog/{kind}") { entry ->
                 CatalogIndexContent(catalog, entry.arguments?.getString("kind") == "artists", vm::artworkUrl,

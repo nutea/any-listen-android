@@ -12,10 +12,10 @@ object LibrarySearch {
             return rows.filter { (_, text) -> terms.all { text.contains(it, ignoreCase = true) } }.map { it.first }
         }
     }
-    fun index(snapshot: LibrarySnapshot): Index {
+    fun index(snapshot: LibrarySnapshot, playlistId: String? = null): Index {
         val tracks = linkedMapOf<String, Track>()
         val origins = linkedMapOf<String, MutableSet<String>>()
-        snapshot.playlists.forEach { playlist -> snapshot.tracksByPlaylist[playlist.id].orEmpty().forEach { track ->
+        snapshot.playlists.filter { playlistId == null || it.id == playlistId }.forEach { playlist -> snapshot.tracksByPlaylist[playlist.id].orEmpty().forEach { track ->
             tracks.putIfAbsent(track.cacheKey, track)
             origins.getOrPut(track.cacheKey) { linkedSetOf() }.add(playlist.id)
         } }
@@ -27,5 +27,5 @@ object LibrarySearch {
             LibrarySearchHit(track, origins.getValue(key).toList()) to text
         })
     }
-    fun find(snapshot: LibrarySnapshot, query: String) = index(snapshot).find(query)
+    fun find(snapshot: LibrarySnapshot, query: String, playlistId: String? = null) = index(snapshot, playlistId).find(query)
 }

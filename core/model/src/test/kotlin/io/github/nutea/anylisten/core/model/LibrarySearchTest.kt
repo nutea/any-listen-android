@@ -23,4 +23,32 @@ class LibrarySearchTest {
         assertTrue(LibrarySearch.find(snapshot, "missing").isEmpty())
         assertEquals(LibrarySearch.find(snapshot, "  Alice  home "), LibrarySearch.find(snapshot.copy(offline = true), "Alice home"))
     }
+
+    @Test fun playlistScopeExcludesOtherPlaylistsAndTheirOrigins() {
+        val result = LibrarySearch.find(snapshot, "Morning", "love")
+        assertEquals(listOf(one), result.map { it.track })
+        assertEquals(listOf("love"), result.single().playlistIds)
+        assertTrue(LibrarySearch.find(snapshot, "Bob", "love").isEmpty())
+        assertEquals(2, LibrarySearch.find(snapshot, "Morning", "other").size)
+    }
+
+    @Test fun playlistScopeUsesItsOwnMetadataAndPinyinIndex() {
+        val scoped = one.copy(title = "呼吸有害", artist = "莫文蔚", album = "专辑", playlistId = "other")
+        val library = snapshot.copy(tracksByPlaylist = snapshot.tracksByPlaylist + ("other" to listOf(scoped)))
+        assertEquals(scoped, LibrarySearch.find(library, "hxyh mowenwei", "other").single().track)
+        assertTrue(LibrarySearch.find(library, "Alice", "other").isEmpty())
+        assertEquals(one, LibrarySearch.find(library, "Alice").single().track)
+    }
+
+    @Test fun missingDeletedAndEmptyScopesNeverFallBackToGlobalSearch() {
+        val empty = snapshot.copy(playlists = snapshot.playlists + Playlist("empty", "Empty", "user", 0))
+        listOf("missing", "", "empty").forEach { id ->
+            assertTrue(LibrarySearch.index(empty, id).all.isEmpty())
+        }
+        val deleted = snapshot.copy(playlists = snapshot.playlists.filterNot { it.id == "love" })
+        assertTrue(LibrarySearch.find(deleted, "Morning", "love").isEmpty())
+        assertEquals(2, LibrarySearch.find(deleted, "Morning").size)
+        assertEquals(LibrarySearch.find(snapshot, "Morning", "love"),
+            LibrarySearch.find(snapshot.copy(offline = true), "Morning", "love"))
+    }
 }

@@ -69,6 +69,7 @@ class LibraryNavigationTest {
         show { LibrarySearchContent(snapshot, null, { null }, { false }, { false }, {}, { tracks, track -> queue = tracks; started = track }) { _, _ -> } }
         compose.onNodeWithText(first.title).assertDoesNotExist()
         compose.onNode(hasSetTextAction()).performTextInput("夜色散步")
+        compose.waitUntil(5000) { compose.onAllNodesWithText(other.title).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodesWithText(first.title).assertCountEquals(1)
         compose.onNodeWithText(other.title).assertIsDisplayed()
         compose.onNodeWithText(other.title).performClick()
@@ -76,7 +77,7 @@ class LibraryNavigationTest {
         screenshot("library-search")
         compose.onNodeWithContentDescription(context.getString(R.string.clear_search)).performClick()
         compose.onNodeWithText(first.title).assertDoesNotExist()
-        compose.onNodeWithText(context.getString(R.string.library_search_start)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.search_history)).assertIsDisplayed()
     }
 
     @Test fun lastPlayedShowsNewestFirstAndEmptyState() {

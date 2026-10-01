@@ -102,7 +102,8 @@ class CatalogFeatureTest {
         show { PlayerContent(PlayerUiState(track = first), { null }, false, false,
             PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, artist = { artist = true }, album = { album = true })) }
         compose.onNodeWithTag("player_artist").performClick()
-        compose.onNodeWithTag("player_album").performClick()
+        compose.onNodeWithTag("player_more").performClick()
+        compose.onNodeWithTag("player_album").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(artist); assertTrue(album) }
         screenshot("catalog-player-links")
     }

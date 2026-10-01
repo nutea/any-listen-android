@@ -218,7 +218,10 @@
     <string name="custom_playlists_empty">No custom playlists yet</string>
     <string name="library_search_hint">Search songs, artists, albums</string>
     <string name="library_search_scope">Search all synced playlists. Duplicate songs appear once.</string>
-    <string name="library_search_offline">Searching the synced library offline. Only complete cached or downloaded audio can play.</string>
+    <string name="library_search_offline">Offline mode. Only complete cached or downloaded audio can play.</string>
+    <string name="library_search_playlist_hint">Search this playlist by song, artist or album</string>
+    <string name="library_search_playlist_scope">Search scope: %1$s</string>
+    <string name="library_search_playlist_missing">This playlist no longer exists. Go back and choose another.</string>
     <string name="library_search_start">Search your library</string>
     <string name="library_search_results">%1$d songs found</string>
     <string name="library_search_origins">In: %1$s</string>
@@ -359,4 +362,11 @@
     <string name="smart_library_title">Smart library</string>
     <string name="smart_library_subtitle">Most played, rediscover and listening stats</string>
     <string name="lyric_candidates_empty">No candidates found. Try another title, artist or source, or import an LRC file.</string>
+    <string name="player_details">Song details and more</string>
+    <string name="player_details_downloaded">Downloaded, ready for offline listening</string>
+    <string name="player_details_cached">Cached, available offline</string>
+    <string name="player_metadata_missing">No album information</string>
+    <string name="player_effects_summary">%1$.2f× · Original pitch</string>
+    <string name="player_audio_summary">Format, bitrate, sample rate and audio source</string>
+    <string name="player_lyrics_summary">Translation, romanization, word timing and offset</string>
 </resources>
